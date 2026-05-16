@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-05-16
+
+### Added
+- **Automated release pipeline** (`.github/workflows/release.yml`): every `v*.*.*` tag now publishes the sdist + wheel to [PyPI](https://pypi.org/p/mithril-llm) and a multi-arch (`linux/amd64`, `linux/arm64`) Docker image to [GHCR](https://github.com/AaronGrillot98/mithril/pkgs/container/mithril) — gated by the existing test + benchmark + lint suite.
+- Tighter PyPI metadata: extra classifiers (typed, FastAPI framework, networking/monitoring topics, Python 3.13), additional URLs (Repository, Changelog, Documentation), and broader keywords for discoverability.
+
+### Fixed
+- Dashboard CSS: split body's compound `background` shorthand into separate `background-color` + `background-image` so the deep-night palette fills the full viewport in headless render and at very tall scroll heights.
+
 ## [0.2.0] — 2026-05-16
 
 ### Added
@@ -44,6 +53,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - GitHub Actions CI: pytest + benchmark + ruff across Ubuntu/Windows × Python 3.10/3.11/3.12.
 - Demo GIF generator (`scripts/render_demo_gif.py`).
 
-[Unreleased]: https://github.com/AaronGrillot98/mithril/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/AaronGrillot98/mithril/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/AaronGrillot98/mithril/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/AaronGrillot98/mithril/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/AaronGrillot98/mithril/releases/tag/v0.1.0

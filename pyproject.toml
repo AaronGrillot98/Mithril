@@ -1,21 +1,36 @@
 [project]
 name = "mithril-llm"
-version = "0.2.0"
+version = "0.2.1"
 description = "A firewall for LLMs — block prompt injection, jailbreaks, and PII exfiltration in real time."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Mithril contributors" }]
-keywords = ["llm", "security", "prompt-injection", "jailbreak", "ai-security", "guardrails", "openai-proxy"]
+keywords = [
+    "llm", "security", "prompt-injection", "jailbreak", "ai-security",
+    "guardrails", "openai-proxy", "llm-firewall", "owasp-llm-top-10",
+    "prompt-firewall", "ai-firewall",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
     "Intended Audience :: Developers",
     "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
     "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: WSGI :: Middleware",
     "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Networking :: Monitoring",
+    "Typing :: Typed",
 ]
 dependencies = [
     "fastapi>=0.110",
@@ -40,8 +55,11 @@ dev = [
 mithril = "mithril.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/AaronGrillot98/mithril"
-Issues = "https://github.com/AaronGrillot98/mithril/issues"
+Homepage      = "https://github.com/AaronGrillot98/mithril"
+Repository    = "https://github.com/AaronGrillot98/mithril"
+Issues        = "https://github.com/AaronGrillot98/mithril/issues"
+Changelog     = "https://github.com/AaronGrillot98/mithril/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/AaronGrillot98/mithril#readme"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

@@ -7,9 +7,9 @@
 **Block prompt injection, jailbreaks, and PII exfiltration in real time — with one line of config.**
 
 [![CI](https://github.com/AaronGrillot98/mithril/actions/workflows/ci.yml/badge.svg)](https://github.com/AaronGrillot98/mithril/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/mithril-llm?color=4c83cf)](https://pypi.org/project/mithril-llm/)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0-silver.svg)](#)
 [![Status](https://img.shields.io/badge/status-alpha-silver.svg)](#)
 
 <br />
@@ -126,7 +126,14 @@ No data ever leaves your machine — the judge, the proxy, and the upstream mode
 
 ## Install
 
-**Docker (easiest):**
+**pip:**
+
+```bash
+pip install mithril-llm
+mithril serve
+```
+
+**Docker:**
 
 ```bash
 docker run -p 8080:8080 -e MITHRIL_UPSTREAM_URL=https://api.openai.com/v1 \
@@ -141,7 +148,7 @@ git clone https://github.com/AaronGrillot98/mithril && cd mithril
 docker compose up
 ```
 
-**Linux / macOS one-liner:**
+**Linux / macOS one-liner** (private virtualenv, no system Python pollution):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AaronGrillot98/mithril/main/install.sh | bash
@@ -152,8 +159,6 @@ curl -fsSL https://raw.githubusercontent.com/AaronGrillot98/mithril/main/install
 ```powershell
 iwr -useb https://raw.githubusercontent.com/AaronGrillot98/mithril/main/install.ps1 | iex
 ```
-
-The shell installers drop Mithril into a private virtualenv (`~/.mithril/venv` on Linux/macOS, `%LOCALAPPDATA%\Mithril\venv` on Windows) and put a `mithril` launcher on your PATH. Nothing leaks into your system Python.
 
 <details>
 <summary>Or install from source</summary>
