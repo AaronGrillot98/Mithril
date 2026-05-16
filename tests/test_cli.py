@@ -7,11 +7,22 @@ plus exit code, so we don't need a subprocess.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from typer.testing import CliRunner
 
 from mithril.cli import app
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _plain(s: str) -> str:
+    """Strip ANSI escape codes. Rich/Typer can split tokens like `--threshold`
+    across style runs, which makes substring assertions on raw stdout brittle
+    depending on terminal width and TTY detection."""
+    return _ANSI_RE.sub("", s)
 
 
 @pytest.fixture
@@ -128,15 +139,19 @@ def test_scan_role_hijack(runner):
 
 def test_help_lists_all_commands(runner):
     r = runner.invoke(app, ["--help"])
+    out = _plain(r.stdout)
     assert r.exit_code == 0
-    assert "scan" in r.stdout
-    assert "serve" in r.stdout
-    assert "version" in r.stdout
+    assert "scan" in out
+    assert "serve" in out
+    assert "version" in out
 
 
 def test_scan_help(runner):
     r = runner.invoke(app, ["scan", "--help"])
+    out = _plain(r.stdout)
     assert r.exit_code == 0
-    assert "--threshold" in r.stdout
-    assert "--judge" in r.stdout
-    assert "--json" in r.stdout
+    # Rich may split option flags across ANSI style runs (e.g. `-`...style...`-threshold`),
+    # so we search the stripped text for the flag *names* — no leading dashes.
+    assert "threshold" in out
+    assert "judge" in out
+    assert "json" in out
