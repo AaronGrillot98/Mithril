@@ -44,10 +44,25 @@ class Finding(BaseModel):
     excerpt: str = ""
 
 
+JudgeVerdictKind = Literal["attack", "benign", "error"]
+
+
+class JudgeVerdict(BaseModel):
+    """A second-opinion classification from the LLM judge."""
+
+    verdict: JudgeVerdictKind
+    confidence: float = Field(ge=0.0, le=1.0)
+    reason: str = ""
+    model: str = ""
+    latency_ms: float = 0.0
+
+
 class DetectionResult(BaseModel):
     blocked: bool
     score: float = Field(ge=0.0, le=1.0)
     findings: list[Finding] = []
+    # Set when the judge was consulted (request fell in the ambiguous zone).
+    judge: JudgeVerdict | None = None
 
     @property
     def top_severity(self) -> Severity:
@@ -64,12 +79,13 @@ class BlockResponse(BaseModel):
 
     @classmethod
     def from_result(cls, result: DetectionResult) -> "BlockResponse":
-        return cls(
-            error={
-                "type": "promptguard_blocked",
-                "message": "Request blocked by PromptGuard.",
-                "score": result.score,
-                "severity": result.top_severity,
-                "findings": [f.model_dump() for f in result.findings],
-            }
-        )
+        body: dict[str, Any] = {
+            "type": "mithril_blocked",
+            "message": "Request blocked by Mithril.",
+            "score": result.score,
+            "severity": result.top_severity,
+            "findings": [f.model_dump() for f in result.findings],
+        }
+        if result.judge is not None:
+            body["judge"] = result.judge.model_dump()
+        return cls(error=body)

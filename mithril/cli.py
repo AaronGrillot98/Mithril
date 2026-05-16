@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 
@@ -11,6 +12,7 @@ from rich.table import Table
 from mithril import __version__
 from mithril.config import settings
 from mithril.detectors import default_pipeline
+from mithril.judges import build_judge
 
 app = typer.Typer(
     add_completion=False,
@@ -30,6 +32,13 @@ def serve(
     console.print(f"  mode      : [bold]{settings.mode}[/]")
     console.print(f"  threshold : [bold]{settings.threshold}[/]")
     console.print(f"  upstream  : [bold]{settings.upstream_url}[/]")
+    if settings.judge_enabled:
+        console.print(
+            f"  judge     : [bold]{settings.judge_provider}[/] · "
+            f"{settings.judge_model} · band [{settings.judge_low_threshold}–{settings.judge_high_threshold}]"
+        )
+    else:
+        console.print("  judge     : [dim]disabled[/]")
     console.print(f"  listening : [bold]http://{host}:{port}[/]\n")
     uvicorn.run("mithril.server:app", host=host, port=port, reload=reload)
 
@@ -38,6 +47,11 @@ def serve(
 def scan(
     text: str = typer.Argument(None, help="Text to scan. Reads stdin if omitted."),
     threshold: float = typer.Option(settings.threshold, help="Block threshold."),
+    judge: bool = typer.Option(
+        False,
+        "--judge/--no-judge",
+        help="Invoke the LLM judge on ambiguous prompts (requires MITHRIL_JUDGE_* config).",
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit raw JSON."),
 ) -> None:
     """Scan a single piece of text and report findings."""
@@ -47,8 +61,16 @@ def scan(
         console.print("[red]No text provided.[/]")
         raise typer.Exit(code=2)
 
-    pipeline = default_pipeline(threshold=threshold)
-    result = pipeline.scan(text)
+    judge_instance = build_judge(settings) if judge else None
+    pipeline = default_pipeline(threshold=threshold, judge=judge_instance)
+    pipeline.judge_low = settings.judge_low_threshold
+    pipeline.judge_high = settings.judge_high_threshold
+    pipeline.fail_mode = settings.judge_fail_mode
+
+    if judge:
+        result = asyncio.run(_evaluate_and_close(pipeline, text))
+    else:
+        result = pipeline.scan(text)
 
     if json_out:
         typer.echo(json.dumps(result.model_dump(), indent=2))
@@ -75,7 +97,27 @@ def scan(
             )
         console.print(table)
 
+    if result.judge is not None:
+        console.print()
+        verdict_color = "red" if result.judge.verdict == "attack" else "green"
+        if result.judge.verdict == "error":
+            verdict_color = "yellow"
+        console.print(
+            f"[bold]judge[/]  [bold {verdict_color}]{result.judge.verdict}[/]  "
+            f"confidence={result.judge.confidence:.2f}  "
+            f"model={result.judge.model}  ({result.judge.latency_ms:.0f}ms)"
+        )
+        if result.judge.reason:
+            console.print(f"  [dim]reason:[/] {result.judge.reason}")
+
     raise typer.Exit(code=1 if result.blocked else 0)
+
+
+async def _evaluate_and_close(pipeline, text):
+    try:
+        return await pipeline.evaluate(text)
+    finally:
+        await pipeline.aclose()
 
 
 @app.command()

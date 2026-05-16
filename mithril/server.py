@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from mithril import __version__
 from mithril.config import settings
 from mithril.detectors import default_pipeline
+from mithril.judges import build_judge
 from mithril.models import BlockResponse, ChatCompletionRequest, DetectionResult
 from mithril.proxy import UpstreamClient
 from mithril.storage import EventStore
@@ -22,15 +23,23 @@ templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.pipeline = default_pipeline(threshold=settings.threshold)
+    judge = build_judge(settings)
+    app.state.pipeline = default_pipeline(
+        threshold=settings.threshold,
+        judge=judge,
+    )
+    app.state.pipeline.judge_low = settings.judge_low_threshold
+    app.state.pipeline.judge_high = settings.judge_high_threshold
+    app.state.pipeline.fail_mode = settings.judge_fail_mode
     app.state.upstream = UpstreamClient(settings.upstream_url)
     app.state.store = EventStore(settings.db_path)
     yield
     await app.state.upstream.aclose()
+    await app.state.pipeline.aclose()
 
 
 app = FastAPI(
-    title="PromptGuard",
+    title="Mithril",
     description="A firewall for LLMs — blocks prompt injection, jailbreaks, and PII exfil.",
     version=__version__,
     lifespan=lifespan,
@@ -45,6 +54,14 @@ async def health() -> dict[str, Any]:
         "mode": settings.mode,
         "threshold": settings.threshold,
         "upstream": settings.upstream_url,
+        "judge": {
+            "enabled": settings.judge_enabled,
+            "provider": settings.judge_provider,
+            "model": settings.judge_model if settings.judge_enabled else None,
+            "low": settings.judge_low_threshold,
+            "high": settings.judge_high_threshold,
+            "fail_mode": settings.judge_fail_mode,
+        },
     }
 
 
@@ -52,14 +69,24 @@ async def health() -> dict[str, Any]:
 async def scan(payload: dict[str, Any]) -> dict[str, Any]:
     """Standalone scan endpoint — no upstream forwarding.
 
-    Body: {"text": "..."} or {"messages": [{"role": "...", "content": "..."}]}
+    Body:
+      {"text": "..."}                    or
+      {"messages": [{"role": "...", "content": "..."}]}
+      ?judge=true|false (default true if judge enabled in settings)
     """
     pipeline = app.state.pipeline
+    use_judge = bool(payload.get("judge", True))
+
     if "text" in payload:
-        result = pipeline.scan(str(payload["text"]))
+        text = str(payload["text"])
+        result = await pipeline.evaluate(text) if use_judge else pipeline.scan(text)
     elif "messages" in payload:
         texts = [str(m.get("content", "")) for m in payload["messages"]]
-        result = pipeline.scan_messages(texts)
+        result = (
+            await pipeline.evaluate_messages(texts)
+            if use_judge
+            else pipeline.scan_messages(texts)
+        )
     else:
         raise HTTPException(400, "Provide 'text' or 'messages'.")
     return result.model_dump()
@@ -70,7 +97,7 @@ async def chat_completions(request: Request) -> Any:
     """OpenAI-compatible chat completions endpoint.
 
     Drop-in replacement: point your existing OpenAI SDK at http://<host>:<port>/v1
-    and PromptGuard will scan every request before it reaches the upstream model.
+    and Mithril will scan every request before it reaches the upstream model.
     """
     body = await request.json()
     try:
@@ -79,7 +106,7 @@ async def chat_completions(request: Request) -> Any:
         raise HTTPException(400, f"Invalid chat completions request: {exc}")
 
     texts = [m.text() for m in parsed.messages]
-    result: DetectionResult = app.state.pipeline.scan_messages(texts)
+    result: DetectionResult = await app.state.pipeline.evaluate_messages(texts)
     snippet = " | ".join(t[:120] for t in texts if t)
 
     if result.blocked and settings.mode == "block":

@@ -9,6 +9,7 @@
 [![CI](https://github.com/AaronGrillot98/mithril/actions/workflows/ci.yml/badge.svg)](https://github.com/AaronGrillot98/mithril/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.2.0-silver.svg)](#)
 [![Status](https://img.shields.io/badge/status-alpha-silver.svg)](#)
 
 <br />
@@ -70,13 +71,58 @@ Add your own cases to `scripts/benchmark_data.jsonl` and rerun — PRs welcome.
 ## Features
 
 - **OpenAI-compatible drop-in.** Point your existing SDK at Mithril. No code changes.
+- **Two-stage defense.** Sub-millisecond regex catches the common attacks; an optional LLM judge handles the ambiguous middle.
 - **Layered detection.** Jailbreak personas (DAN, AIM, STAN, Developer Mode), instruction-override attacks, ChatML / Llama-INST role hijacks, system-prompt leak attempts, PII (SSN, credit cards, private keys), and credential exfil (OpenAI / AWS / GitHub / Slack tokens).
-- **Auditable.** Every rule is a single regex with a stable ID, severity, and confidence. No black-box model.
+- **Auditable.** Every rule is a single regex with a stable ID, severity, and confidence. No black-box model on the hot path.
 - **Two modes.** `block` (return HTTP 403 with a structured reason) or `log` (forward but record).
 - **Built-in dashboard.** Browse blocked requests, filter by severity, see what tripped.
 - **Streaming-safe.** Server-sent events pass through cleanly.
 - **CLI for one-shot scans.** `mithril scan "ignore previous instructions..."`.
-- **Sub-millisecond per request.** Pure-regex pipeline, no model inference.
+
+## Two-stage defense (v0.2)
+
+```
+                 ┌─────────────────────────────────────────────┐
+                 │                                             │
+   user prompt ─►│  ⚡ heuristic detectors (regex)             ├─► score
+                 │     30+ rules, <1ms                         │
+                 └─────────────────────────────────────────────┘
+                                       │
+                            ┌──────────┴──────────┐
+                            │                     │
+                     score ≥ HIGH           LOW < score < HIGH        score ≤ LOW
+                       (block)                (judge)                  (allow)
+                                                 │
+                                                 ▼
+                                  ┌──────────────────────────────┐
+                                  │ 🪙  LLM judge (your model)   │
+                                  │    second-opinion classifier │
+                                  │    on the ambiguous middle    │
+                                  └──────────────────────────────┘
+                                                 │
+                                          attack │ benign
+                                          (block)│ (allow)
+```
+
+The heuristic stage handles **clear cases** at <1 ms. The judge runs only on the ambiguous **middle band** (typically <5% of traffic) — so even if you point it at GPT-4o, your average per-request cost stays in the cents-per-thousand-requests range. The judge sees the user message inside opaque delimiters and is instructed never to follow embedded instructions — second-order injection is mitigated by design.
+
+Enable it with two env vars:
+
+```bash
+MITHRIL_JUDGE_ENABLED=true
+MITHRIL_JUDGE_API_KEY=sk-...    # whatever your provider needs
+```
+
+**Want it fully self-hosted?** Point it at Ollama, vLLM, or llama.cpp:
+
+```bash
+MITHRIL_JUDGE_ENABLED=true
+MITHRIL_JUDGE_BASE_URL=http://localhost:11434/v1
+MITHRIL_JUDGE_MODEL=llama3.2:3b
+MITHRIL_JUDGE_API_KEY=
+```
+
+No data ever leaves your machine — the judge, the proxy, and the upstream model can all run on the same box.
 
 ## Install
 
@@ -158,6 +204,8 @@ echo "My key is sk-abcdef0123456789..." | mithril scan --json
 
 All settings via env vars or `.env`:
 
+**Proxy**
+
 | Variable                  | Default                        | Description                              |
 | ------------------------- | ------------------------------ | ---------------------------------------- |
 | `MITHRIL_UPSTREAM_URL`    | `https://api.openai.com/v1`    | Where clean requests get forwarded.      |
@@ -167,7 +215,21 @@ All settings via env vars or `.env`:
 | `MITHRIL_THRESHOLD`       | `0.7`                          | Min confidence to trigger block.         |
 | `MITHRIL_DB_PATH`         | `mithril.db`                   | SQLite event log path.                   |
 
-Works out of the box with any OpenAI-compatible API — OpenAI, Anthropic (via shim), Ollama, Together, vLLM, llama.cpp, LM Studio.
+**LLM judge (v0.2)**
+
+| Variable                          | Default                        | Description                              |
+| --------------------------------- | ------------------------------ | ---------------------------------------- |
+| `MITHRIL_JUDGE_ENABLED`           | `false`                        | Master switch.                           |
+| `MITHRIL_JUDGE_PROVIDER`          | `openai_compat`                | `openai_compat` or `none`.               |
+| `MITHRIL_JUDGE_BASE_URL`          | `https://api.openai.com/v1`    | OpenAI-compatible endpoint.              |
+| `MITHRIL_JUDGE_MODEL`             | `gpt-4o-mini`                  | Judge model name.                        |
+| `MITHRIL_JUDGE_API_KEY`           | _(empty)_                      | Provider API key.                        |
+| `MITHRIL_JUDGE_LOW_THRESHOLD`     | `0.2`                          | Below this: regex-only allow.            |
+| `MITHRIL_JUDGE_HIGH_THRESHOLD`    | `0.9`                          | Above this: regex-only block.            |
+| `MITHRIL_JUDGE_FAIL_MODE`         | `open`                         | `open` or `closed` on judge errors.      |
+| `MITHRIL_JUDGE_TIMEOUT`           | `5.0`                          | Seconds before the judge call gives up.  |
+
+Works out of the box with any OpenAI-compatible API — OpenAI, Anthropic (via shim), Ollama, Together, Groq, vLLM, llama.cpp, LM Studio.
 
 ## Detection coverage (v0.1)
 
@@ -185,11 +247,12 @@ Every rule is one line in [`mithril/detectors/heuristics.py`][heur] — fork it,
 
 ## Roadmap
 
-- [ ] **v0.2** — LLM-judge fallback for ambiguous requests (use a small local model as second opinion)
-- [ ] **v0.3** — Embedding-based similarity to known jailbreak corpora ([JailbreakBench], GCG)
-- [ ] **v0.4** — Output scanning (catch the model leaking PII in *responses*)
-- [ ] **v0.5** — Per-route policies (different thresholds for different endpoints)
-- [ ] **v1.0** — Published precision/recall against the full JailbreakBench + [Garak] corpora
+- [x] **v0.1** — Regex pipeline + OpenAI-compatible proxy + SQLite log + dashboard.
+- [x] **v0.2** — LLM-judge fallback for ambiguous requests (OpenAI / Anthropic / Ollama / vLLM / Together / Groq).
+- [ ] **v0.3** — Embedding-based similarity to known jailbreak corpora ([JailbreakBench], GCG).
+- [ ] **v0.4** — Output scanning (catch the model leaking PII in *responses*).
+- [ ] **v0.5** — Per-route policies (different thresholds for different endpoints).
+- [ ] **v1.0** — Published precision/recall against the full JailbreakBench + [Garak] corpora.
 
 [JailbreakBench]: https://jailbreakbench.github.io/
 [Garak]: https://github.com/leondz/garak
