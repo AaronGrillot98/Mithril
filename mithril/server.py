@@ -16,6 +16,7 @@ from mithril import __version__
 from mithril.config import settings
 from mithril.detectors import default_pipeline
 from mithril.judges import build_judge
+from mithril.middleware import RequestIDMiddleware
 from mithril.models import BlockResponse, ChatCompletionRequest, DetectionResult
 from mithril.proxy import UpstreamClient
 from mithril.storage import EventStore
@@ -85,6 +86,7 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
+app.add_middleware(RequestIDMiddleware)
 
 
 @app.get("/health")

@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-05-16
+
+Second hardening pass. Closes the remaining QA punch list left from v0.3.1.
+Coverage 77% → 86% overall. No new features.
+
+### Added
+- **`RequestIDMiddleware`** (`mithril/middleware.py`). Every request to the proxy now gets a stable correlation ID — pulled from an inbound `X-Request-ID` header if present, otherwise a fresh UUID4. The ID is attached to `request.state.request_id`, included in a structured access-log line (`mithril.access`), and echoed back in the response `X-Request-ID` header. Crucial for tracing failures in production.
+- **32 new tests** across three files:
+  - `tests/test_cli.py` — 13 tests covering `mithril version`, `mithril scan` with benign / jailbreak / PII / role-hijack inputs, `--json` output, `--threshold` override, stdin handling, empty-input guard, help text.
+  - `tests/test_judge_http.py` — 14 tests for the OpenAI-compatible judge's HTTP paths using `httpx.MockTransport`: clean JSON, `response_format` 400 retry, transport errors, 4xx/5xx fallthrough, missing envelope keys, non-string content, non-JSON output, confidence clamping, unknown-verdict defense in depth, `aclose` idempotency, auth header gating.
+  - `tests/test_middleware.py` — 5 tests for the request-ID middleware: header generation, inbound echo, uniqueness, access-log emission, log-on-failure.
+
+### Coverage gains
+
+| Module | Before | After |
+|--------|--------|-------|
+| `cli.py` | 0% | **72%** |
+| `judges/openai_compat.py` | 55% | **94%** |
+| `judges/base.py` | 61% | **95%** |
+| `middleware.py` | new | **100%** |
+| **Total** | **77%** | **86%** |
+
+### Fixed
+- **`Judge.aclose()` B027 lint.** The default no-op was flagged as an unmarked abstract method. Now has an explicit `return None` body and a tightly-scoped `# noqa` with a docstring that documents the intent.
+
+### Backwards compatibility
+100%. Public API unchanged. The request-ID middleware adds a response header that wasn't there before, which is purely additive.
+
 ## [0.3.1] — 2026-05-16
 
 QA hardening pass. Six real bugs fixed, four 0%-coverage files brought to ~90% coverage, total coverage up from 58% → 77%. No new features.
@@ -123,7 +151,8 @@ QA hardening pass. Six real bugs fixed, four 0%-coverage files brought to ~90% c
 - GitHub Actions CI: pytest + benchmark + ruff across Ubuntu/Windows × Python 3.10/3.11/3.12.
 - Demo GIF generator (`scripts/render_demo_gif.py`).
 
-[Unreleased]: https://github.com/AaronGrillot98/mithril/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/AaronGrillot98/mithril/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/AaronGrillot98/mithril/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/AaronGrillot98/mithril/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/AaronGrillot98/mithril/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/AaronGrillot98/mithril/compare/v0.2.1...v0.2.2

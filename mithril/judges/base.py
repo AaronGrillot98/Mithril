@@ -105,5 +105,10 @@ class Judge(ABC):
         """
         raise NotImplementedError
 
-    async def aclose(self) -> None:
-        """Release any held resources (HTTP clients, etc.)."""
+    async def aclose(self) -> None:  # noqa: B027 — default no-op; subclasses with held resources override
+        """Release any held resources (HTTP clients, etc.).
+
+        Default implementation is a no-op. Subclasses with persistent
+        connections (e.g. ``OpenAICompatibleJudge``) should override.
+        """
+        return None
