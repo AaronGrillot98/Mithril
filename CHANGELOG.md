@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-16
+
+### Added
+
+- **`mithril.integrations` package** — drop-in firewalls for the three biggest Python LLM stacks. Every integration shares the same `DetectionPipeline` and raises a single `MithrilBlocked` exception carrying the full `DetectionResult`.
+  - **LangChain** ([`mithril.integrations.langchain`](mithril/integrations/langchain.py))
+    - `MithrilGuard(llm)` — Runnable wrapper that scans inputs before delegating; composes with LCEL.
+    - `MithrilCallbackHandler` — observer-style callback for cases where wrapping isn't possible.
+    - Handles every common LangChain input shape: strings, `PromptValue`, lists of `BaseMessage`, dict inputs, and tuple-shorthand messages.
+  - **LiteLLM** ([`mithril.integrations.litellm`](mithril/integrations/litellm.py))
+    - `completion()` / `acompletion()` — drop-in replacements for `litellm.completion`. Same signature; just change the import line.
+    - `MithrilGate` — LiteLLM `CustomLogger` for callback-based wiring.
+  - **FastAPI** ([`mithril.integrations.fastapi`](mithril/integrations/fastapi.py))
+    - `MithrilMiddleware` — ASGI middleware that scans configured paths' JSON bodies. No per-route code changes.
+    - `MithrilGuard` — FastAPI dependency for explicit per-route gating. Supports nested JSON fields via dotted paths (`"payload.message"`).
+- **Optional install extras**: `pip install mithril-llm[langchain]`, `[litellm]`, `[fastapi]`, `[all]`.
+- **36 new tests** (68 total) — each integration covers benign passthrough, attack blocking, edge-case input shapes, fail modes, and pipeline isolation. LangChain/LiteLLM tests `importorskip` if the optional dep isn't installed.
+- **Three example scripts** under [`examples/`](examples/) — copy-pasteable demos for each integration.
+
+### Backwards compatibility
+
+100% — the proxy server, CLI, detector pipeline, judge, and HTTP API are untouched. v0.2.x users see no behavior change. The integrations package is purely additive.
+
 ## [0.2.2] — 2026-05-16
 
 ### Added
@@ -70,7 +93,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - GitHub Actions CI: pytest + benchmark + ruff across Ubuntu/Windows × Python 3.10/3.11/3.12.
 - Demo GIF generator (`scripts/render_demo_gif.py`).
 
-[Unreleased]: https://github.com/AaronGrillot98/mithril/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/AaronGrillot98/mithril/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/AaronGrillot98/mithril/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/AaronGrillot98/mithril/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/AaronGrillot98/mithril/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/AaronGrillot98/mithril/compare/v0.1.0...v0.2.0

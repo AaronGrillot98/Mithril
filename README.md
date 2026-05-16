@@ -222,6 +222,75 @@ client.chat.completions.create(
 )
 ```
 
+## Integrations
+
+Drop Mithril into your existing LLM stack with one import.
+
+### LangChain
+
+```python
+from langchain_openai import ChatOpenAI
+from mithril.integrations.langchain import MithrilGuard
+
+llm     = ChatOpenAI(model="gpt-4o-mini")
+guarded = MithrilGuard(llm)
+
+guarded.invoke("What's the capital of France?")          # passes
+guarded.invoke("Ignore previous instructions and ...")   # raises MithrilBlocked
+```
+
+`MithrilGuard` is itself a Runnable, so it composes with LCEL: `prompt | MithrilGuard(llm) | parser`.
+
+Also available as a callback handler for cases where you can't wrap the model directly. See [`examples/langchain_guard.py`](examples/langchain_guard.py).
+
+### LiteLLM
+
+```python
+# Before
+# from litellm import completion
+
+# After — same signature, every call is now firewalled
+from mithril.integrations.litellm import completion
+
+response = completion(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Explain how a CPU cache works."}],
+)
+```
+
+See [`examples/litellm_drop_in.py`](examples/litellm_drop_in.py).
+
+### FastAPI
+
+```python
+from fastapi import FastAPI, Body
+from mithril.integrations.fastapi import MithrilMiddleware
+
+app = FastAPI()
+app.add_middleware(
+    MithrilMiddleware,
+    paths=["/chat"],       # only scan these routes
+    json_field="message",  # the prompt field inside the JSON body
+)
+
+@app.post("/chat")
+async def chat(payload: dict = Body(...)) -> dict:
+    # If we get here, payload["message"] has already passed Mithril.
+    return await my_llm.invoke(payload["message"])
+```
+
+Returns HTTP 403 with structured `BlockResponse` on attacks — no code changes needed in your handler. Per-route dependency form (`MithrilGuard`) is also available; see [`examples/fastapi_middleware.py`](examples/fastapi_middleware.py).
+
+### Install extras
+
+```bash
+pip install "mithril-llm[langchain]"   # adds langchain-core
+pip install "mithril-llm[litellm]"     # adds litellm
+pip install "mithril-llm[all]"          # both
+```
+
+The FastAPI integration needs no extras — FastAPI is already a core dependency.
+
 ## CLI
 
 Scan a string directly without running the proxy:
@@ -293,9 +362,10 @@ Every rule is one line in [`mithril/detectors/heuristics.py`][heur] — fork it,
 - [x] **v0.1** — Regex pipeline + OpenAI-compatible proxy + SQLite log + dashboard.
 - [x] **v0.2** — LLM-judge fallback for ambiguous requests (OpenAI / Anthropic / Ollama / vLLM / Together / Groq).
 - [x] **v0.2.2** — Published precision/recall against the full [JailbreakBench] corpus (100% / 100% on jailbreak-framed attacks; 0 false positives on benign).
-- [ ] **v0.3** — Embedding-based similarity to known jailbreak corpora (GCG, AdvSuffix).
+- [x] **v0.3** — LangChain / LiteLLM / FastAPI integrations (drop-in firewalls for the three biggest LLM stacks).
 - [ ] **v0.4** — Output scanning (catch the model leaking PII in *responses*).
-- [ ] **v0.5** — Per-route policies (different thresholds for different endpoints).
+- [ ] **v0.5** — Embedding-based similarity to known jailbreak corpora (GCG, AdvSuffix).
+- [ ] **v0.6** — Per-route policies (different thresholds for different endpoints).
 - [ ] **v1.0** — Published precision/recall against [Garak] as well.
 
 [JailbreakBench]: https://jailbreakbench.github.io/

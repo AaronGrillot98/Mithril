@@ -1,6 +1,6 @@
 [project]
 name = "mithril-llm"
-version = "0.2.2"
+version = "0.3.0"
 description = "A firewall for LLMs — block prompt injection, jailbreaks, and PII exfiltration in real time."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -49,6 +49,15 @@ dev = [
     "pytest-asyncio>=0.23",
     "httpx>=0.27",
     "ruff>=0.4",
+    "langchain-core>=0.2",
+    "litellm>=1.40",
+]
+langchain = ["langchain-core>=0.2"]
+litellm   = ["litellm>=1.40"]
+fastapi   = []  # FastAPI is already a core dependency; this extra exists for documentation parity.
+all       = [
+    "langchain-core>=0.2",
+    "litellm>=1.40",
 ]
 
 [project.scripts]
