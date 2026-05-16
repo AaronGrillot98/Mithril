@@ -7,7 +7,8 @@
 **Block prompt injection, jailbreaks, and PII exfiltration in real time — with one line of config.**
 
 [![CI](https://github.com/AaronGrillot98/mithril/actions/workflows/ci.yml/badge.svg)](https://github.com/AaronGrillot98/mithril/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/mithril-llm?color=4c83cf)](https://pypi.org/project/mithril-llm/)
+[![PyPI](https://img.shields.io/pypi/v/mithril-llm?logo=pypi&logoColor=white&label=pypi&color=4c83cf)](https://pypi.org/project/mithril-llm/)
+[![Downloads](https://img.shields.io/pypi/dm/mithril-llm?color=4c83cf)](https://pypi.org/project/mithril-llm/)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-alpha-silver.svg)](#)
