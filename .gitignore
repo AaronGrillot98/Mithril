@@ -23,3 +23,6 @@ htmlcov/
 .DS_Store
 Thumbs.db
 *.log
+
+# JailbreakBench corpus cache — auto-downloaded by scripts/jailbreakbench_eval.py
+scripts/jbb_cache/

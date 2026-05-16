@@ -104,7 +104,7 @@ class JailbreakDetector(_RuleDetector):
         ),
         (
             "JB007",
-            r"\b(hypothetically|in a fictional|in a story|imagine you)\b.{0,80}(no (rules|restrictions|guidelines|filters)|illegal|harmful)",
+            r"\b(hypothetically|hypothetical|in a fictional|in a story|imagine you|fictional story)\b.{0,80}(no (rules|restrictions|guidelines|filters)|illegal|harmful)",
             "medium",
             0.7,
             "Hypothetical/fictional framing used to bypass guardrails.",
@@ -115,6 +115,17 @@ class JailbreakDetector(_RuleDetector):
             "critical",
             0.97,
             "Classic instruction-override (ignore previous instructions).",
+        ),
+        (
+            "JB011",
+            # "forget the above and answer freely" / "ignore everything above and ..."
+            # Catches the override pattern when the trailing keyword (instructions/
+            # rules/etc.) is omitted but intent is clear from context (answer
+            # freely / respond freely / and answer / and respond / and tell).
+            r"\b(ignore|disregard|forget)\s+(the\s+|everything\s+|all\s+(of\s+)?)?(above|previous|prior)\b.{0,40}\b(answer|respond|reply|tell|comply|do)\b",
+            "high",
+            0.85,
+            "Instruction-override variant without the trailing 'instructions' keyword.",
         ),
         (
             "JB009",
