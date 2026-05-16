@@ -132,7 +132,7 @@ def render(report: dict[str, Any]) -> str:
     lines.append(f"Mithril benchmark — threshold={report['threshold']}, n={t['total']}")
     lines.append("=" * 64)
     lines.append("")
-    lines.append(f"              precision    recall   f1-score   support")
+    lines.append("              precision    recall   f1-score   support")
     lines.append("")
     lines.append(
         f"      attack       {a['precision']:.2f}      {a['recall']:.2f}      "
