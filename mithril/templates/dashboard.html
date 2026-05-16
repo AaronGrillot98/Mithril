@@ -3,180 +3,272 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Mithril — Dashboard</title>
+<title>Mithril</title>
 <style>
+  /* ---------- Mithril palette ----------
+     Inspired by the metal itself: cold silver, moonlit blue, deep night.
+  */
   :root {
-    --bg:        #0a0d14;
-    --bg-grad:   radial-gradient(1200px 800px at 20% -10%, rgba(78, 161, 255, 0.08), transparent 60%),
-                 radial-gradient(900px 600px at 110% 10%, rgba(61, 220, 151, 0.05), transparent 60%);
-    --panel:     #10151f;
-    --panel-2:   #161d2a;
-    --border:    rgba(255, 255, 255, 0.06);
-    --border-2:  rgba(255, 255, 255, 0.10);
-    --text:      #e8eef8;
-    --text-dim:  #b6c1d4;
-    --muted:     #6f7d96;
-    --accent:    #6aa8ff;
-    --accent-2:  #8b5cf6;
-    --green:     #3ddc97;
-    --yellow:    #f4c95d;
-    --orange:    #ff9f43;
-    --red:       #ff6b6b;
-    --critical:  #ff3b6b;
-    --shadow:    0 1px 0 rgba(255,255,255,0.03) inset, 0 8px 24px rgba(0,0,0,0.35);
+    --bg-0:       #07090d;
+    --bg-1:       #0b0e15;
+    --bg-grad:    radial-gradient(1100px 700px at 15% -15%, rgba(120, 168, 255, 0.10), transparent 60%),
+                  radial-gradient(900px 600px at 105% 0%,  rgba(220, 232, 255, 0.04), transparent 60%);
+
+    --panel:      #0f131c;
+    --panel-2:    #141926;
+    --panel-3:    #1a2030;
+    --hairline:   rgba(200, 215, 240, 0.06);
+    --hairline-2: rgba(200, 215, 240, 0.12);
+
+    --text:       #e6ecf7;
+    --text-dim:   #b6c2d6;
+    --muted:      #6c7791;
+
+    --mithril:    #c8d3e6;   /* silver */
+    --mithril-2:  #e8edf5;   /* bright silver */
+    --moon:       #5b9aff;   /* moonlit blue */
+    --moon-2:     #8ab4ff;   /* pale moonlight */
+
+    --ok:         #4ecca3;
+    --warn:       #ffb454;
+    --alert:      #ff7a8a;
+    --crit:       #ff4d6d;
+
+    --shadow:     0 1px 0 rgba(255,255,255,0.03) inset,
+                  0 12px 32px rgba(0, 8, 24, 0.45);
   }
+
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body {
     margin: 0;
     font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    background: var(--bg) var(--bg-grad);
+    background: var(--bg-0) var(--bg-grad);
     color: var(--text);
     -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.005em;
   }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
+  a { color: var(--moon); text-decoration: none; }
+  a:hover { color: var(--moon-2); }
   .mono, code { font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", "SF Mono", monospace; }
+
+  /* ---------- Logo ---------- */
+  .logo {
+    width: 32px; height: 32px; flex-shrink: 0;
+    filter: drop-shadow(0 2px 12px rgba(91, 154, 255, 0.35));
+  }
 
   /* ---------- Header ---------- */
   header {
     position: sticky; top: 0; z-index: 10;
-    padding: 1.1rem 2rem;
-    border-bottom: 1px solid var(--border);
+    padding: 1rem 2rem;
+    border-bottom: 1px solid var(--hairline);
     display: flex; align-items: center; justify-content: space-between;
-    backdrop-filter: blur(12px);
-    background: rgba(10, 13, 20, 0.7);
+    backdrop-filter: blur(14px);
+    background: rgba(7, 9, 13, 0.7);
   }
-  .brand { display: flex; align-items: center; gap: 0.75rem; }
-  .brand-mark {
-    width: 36px; height: 36px; border-radius: 9px;
-    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
-    display: grid; place-items: center;
-    box-shadow: 0 4px 16px rgba(106, 168, 255, 0.35);
-    font-size: 1.2rem;
+  .brand { display: flex; align-items: center; gap: 0.85rem; }
+  .brand h1 {
+    margin: 0; font-size: 1.1rem; font-weight: 600;
+    letter-spacing: 0.02em;
+    background: linear-gradient(180deg, var(--mithril-2), var(--mithril) 65%, var(--moon));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
   }
-  .brand h1 { margin: 0; font-size: 1.15rem; letter-spacing: -0.01em; font-weight: 600; }
-  .brand .sub { color: var(--muted); font-size: 0.78rem; margin-top: 0.1rem; }
-  .header-meta { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; justify-content: flex-end; }
+  .brand .sub {
+    color: var(--muted); font-size: 0.74rem; margin-top: 0.1rem;
+    letter-spacing: 0.04em;
+  }
+
+  .header-meta { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
   .pill {
-    display: inline-flex; align-items: center; gap: 0.4rem;
-    background: var(--panel-2); border: 1px solid var(--border-2);
-    padding: 0.35rem 0.7rem; border-radius: 999px;
-    font-size: 0.75rem; color: var(--text-dim);
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    background: var(--panel-2);
+    border: 1px solid var(--hairline-2);
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    font-size: 0.74rem; color: var(--text-dim);
+    font-weight: 500;
   }
-  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
-  .pill.mode-block .dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .pill.mode-block .dot { background: var(--crit); box-shadow: 0 0 8px var(--crit); }
+  .pill.mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.7rem; }
 
   /* ---------- Main ---------- */
-  main { padding: 2rem; max-width: 1280px; margin: 0 auto; }
+  main { padding: 2rem; max-width: 1300px; margin: 0 auto; }
   .section-label {
-    text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.72rem;
-    color: var(--muted); margin: 2rem 0 0.75rem;
+    text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.7rem;
+    color: var(--muted); margin: 2.25rem 0 0.85rem;
+    font-weight: 500;
   }
 
   /* ---------- Stats ---------- */
   .stats {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1rem;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 0.85rem;
   }
   .stat {
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: 14px; padding: 1.2rem 1.3rem;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 14px;
+    padding: 1.2rem 1.3rem;
     box-shadow: var(--shadow);
     position: relative; overflow: hidden;
+    transition: border-color 0.15s ease;
   }
-  .stat::after {
-    content: ""; position: absolute; inset: 0 0 auto 0; height: 2px;
-    background: linear-gradient(90deg, transparent, var(--border-2), transparent);
+  .stat:hover { border-color: var(--hairline-2); }
+  .stat::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(200,215,240,0.18), transparent);
   }
   .stat .label {
-    color: var(--muted); font-size: 0.72rem; text-transform: uppercase;
-    letter-spacing: 0.08em; font-weight: 500;
+    color: var(--muted); font-size: 0.7rem; text-transform: uppercase;
+    letter-spacing: 0.1em; font-weight: 500;
   }
   .stat .value {
-    font-size: 2.2rem; font-weight: 600; margin-top: 0.5rem;
-    letter-spacing: -0.02em; line-height: 1.1;
+    font-size: 2.1rem; font-weight: 500; margin-top: 0.45rem;
+    letter-spacing: -0.025em; line-height: 1.05;
+    font-variant-numeric: tabular-nums;
   }
-  .stat .delta { color: var(--muted); font-size: 0.78rem; margin-top: 0.25rem; }
-  .stat.blocked .value { color: var(--red); }
-  .stat.allowed .value { color: var(--green); }
+  .stat .delta {
+    color: var(--muted); font-size: 0.76rem; margin-top: 0.3rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat.blocked .value { color: var(--alert); }
+  .stat.allowed .value { color: var(--ok); }
+  .stat.critical .value { color: var(--crit); }
+  .stat.primary .value {
+    background: linear-gradient(180deg, var(--mithril-2), var(--mithril));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
 
   /* ---------- Table ---------- */
   .table-wrap {
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: 14px; overflow: hidden; box-shadow: var(--shadow);
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
   }
   table { width: 100%; border-collapse: collapse; }
   th, td {
-    padding: 0.85rem 1.1rem; text-align: left; font-size: 0.88rem;
-    vertical-align: top; border-bottom: 1px solid var(--border);
+    padding: 0.85rem 1.15rem; text-align: left; font-size: 0.86rem;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--hairline);
   }
   th {
-    background: var(--panel-2); color: var(--muted); font-weight: 500;
-    text-transform: uppercase; font-size: 0.68rem; letter-spacing: 0.08em;
+    background: var(--panel-2);
+    color: var(--muted); font-weight: 500;
+    text-transform: uppercase; font-size: 0.66rem; letter-spacing: 0.1em;
   }
   tr:last-child td { border-bottom: none; }
-  tr:hover td { background: rgba(255,255,255,0.02); }
-  td.time { color: var(--muted); white-space: nowrap; font-size: 0.82rem; }
-  td.model { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.82rem; color: var(--text-dim); }
-  td.score { font-variant-numeric: tabular-nums; font-weight: 500; }
+  tbody tr { transition: background 0.1s ease; }
+  tbody tr:hover { background: rgba(200, 215, 240, 0.02); }
+  td.time { color: var(--muted); white-space: nowrap; font-size: 0.78rem; }
+  td.model {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.78rem; color: var(--text-dim);
+  }
+  td.score {
+    font-variant-numeric: tabular-nums; font-weight: 500;
+    font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.82rem;
+  }
   td.snippet {
     color: var(--text-dim); font-family: "JetBrains Mono", ui-monospace, monospace;
-    font-size: 0.78rem; max-width: 420px;
+    font-size: 0.76rem; max-width: 440px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
 
   /* ---------- Badges ---------- */
   .sev {
     display: inline-flex; align-items: center; gap: 0.4rem;
-    padding: 0.2rem 0.6rem; border-radius: 999px;
-    font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 0.18rem 0.6rem; border-radius: 999px;
+    font-size: 0.66rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
     border: 1px solid currentColor;
+    background: rgba(255, 255, 255, 0.02);
   }
-  .sev::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .sev::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
   .sev.info     { color: var(--muted); }
-  .sev.low      { color: var(--yellow); }
-  .sev.medium   { color: var(--orange); }
-  .sev.high     { color: var(--red); }
-  .sev.critical { color: var(--critical); }
+  .sev.low      { color: var(--warn); }
+  .sev.medium   { color: var(--warn); }
+  .sev.high     { color: var(--alert); }
+  .sev.critical { color: var(--crit); }
 
   .action {
-    display: inline-flex; align-items: center; gap: 0.35rem;
-    font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    font-size: 0.68rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
   }
   .action::before { content: ""; width: 5px; height: 5px; border-radius: 50%; }
-  .action.block::before  { background: var(--red);    box-shadow: 0 0 6px var(--red); }
-  .action.log::before    { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
-  .action.allow::before  { background: var(--green);  box-shadow: 0 0 6px var(--green); }
-  .action.block  { color: var(--red); }
-  .action.log    { color: var(--orange); }
-  .action.allow  { color: var(--green); }
+  .action.block::before  { background: var(--crit);  box-shadow: 0 0 8px var(--crit); }
+  .action.log::before    { background: var(--warn);  box-shadow: 0 0 8px var(--warn); }
+  .action.allow::before  { background: var(--ok);    box-shadow: 0 0 8px var(--ok); }
+  .action.block  { color: var(--crit); }
+  .action.log    { color: var(--warn); }
+  .action.allow  { color: var(--ok); }
 
   /* ---------- Empty state ---------- */
   .empty {
     text-align: center; padding: 4rem 2rem; color: var(--muted);
-    background: var(--panel); border: 1px dashed var(--border-2); border-radius: 14px;
+    background: var(--panel);
+    border: 1px dashed var(--hairline-2);
+    border-radius: 14px;
   }
-  .empty .icon { font-size: 2rem; margin-bottom: 1rem; opacity: 0.5; }
+  .empty svg { width: 48px; height: 48px; opacity: 0.55; margin-bottom: 1rem; }
+  .empty .title { color: var(--text-dim); margin-bottom: 0.4rem; font-size: 0.95rem; }
   .empty .hint {
-    margin-top: 1rem; padding: 0.75rem 1rem;
-    background: var(--panel-2); border-radius: 8px;
-    display: inline-block; font-family: "JetBrains Mono", monospace;
-    font-size: 0.8rem; color: var(--text-dim);
+    margin-top: 1.1rem; padding: 0.7rem 1rem;
+    background: var(--panel-2);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    display: inline-block;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.78rem; color: var(--text-dim);
   }
 
   /* ---------- Footer ---------- */
   footer {
-    text-align: center; color: var(--muted); padding: 3rem 2rem 2rem;
-    font-size: 0.82rem;
+    text-align: center; color: var(--muted); padding: 3rem 2rem 2.5rem;
+    font-size: 0.78rem;
   }
-  footer .links { display: inline-flex; gap: 1.25rem; }
+  footer .links { display: inline-flex; gap: 1.5rem; }
+  footer a { color: var(--muted); }
+  footer a:hover { color: var(--text-dim); }
 </style>
 </head>
 <body>
+
+<!-- Inline SVG: hexagonal shield with inscribed mithril rune -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <linearGradient id="mithril-stroke" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#e8edf5"/>
+      <stop offset="55%" stop-color="#a3b3d4"/>
+      <stop offset="100%" stop-color="#5b9aff"/>
+    </linearGradient>
+    <linearGradient id="mithril-fill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="rgba(91,154,255,0.10)"/>
+      <stop offset="100%" stop-color="rgba(91,154,255,0.02)"/>
+    </linearGradient>
+  </defs>
+</svg>
+
 <header>
   <div class="brand">
-    <div class="brand-mark">⚒️</div>
+    <svg class="logo" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- hex shield -->
+      <path d="M24 3 L42 13 L42 35 L24 45 L6 35 L6 13 Z"
+            stroke="url(#mithril-stroke)" stroke-width="1.6"
+            fill="url(#mithril-fill)" stroke-linejoin="round"/>
+      <!-- inner hex -->
+      <path d="M24 9 L37 16.5 L37 31.5 L24 39 L11 31.5 L11 16.5 Z"
+            stroke="url(#mithril-stroke)" stroke-width="0.7"
+            opacity="0.5" fill="none" stroke-linejoin="round"/>
+      <!-- inscribed M-rune -->
+      <path d="M15 30 L18 18 L24 26 L30 18 L33 30"
+            stroke="url(#mithril-stroke)" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>
     <div>
       <h1>Mithril</h1>
       <div class="sub">A firewall for LLMs · v{{ version }}</div>
@@ -187,14 +279,16 @@
       <span class="dot"></span>{{ settings.mode }} mode
     </span>
     <span class="pill">threshold {{ settings.threshold }}</span>
-    <span class="pill mono" title="{{ settings.upstream_url }}">↗ {{ settings.upstream_url | replace('https://', '') | replace('http://', '') | truncate(32, true) }}</span>
+    <span class="pill mono" title="{{ settings.upstream_url }}">
+      ↗ {{ settings.upstream_url | replace('https://', '') | replace('http://', '') | truncate(28, true) }}
+    </span>
   </div>
 </header>
 
 <main>
   <div class="section-label">Overview</div>
   <section class="stats">
-    <div class="stat">
+    <div class="stat primary">
       <div class="label">Total requests</div>
       <div class="value">{{ stats.total }}</div>
       <div class="delta">since process start</div>
@@ -213,9 +307,9 @@
         {% if stats.total > 0 %}{{ ((stats.allowed / stats.total) * 100) | round(1) }}% of traffic{% else %}—{% endif %}
       </div>
     </div>
-    <div class="stat">
+    <div class="stat critical">
       <div class="label">Critical findings</div>
-      <div class="value" style="color: var(--critical);">{{ stats.by_severity.get('critical', 0) }}</div>
+      <div class="value">{{ stats.by_severity.get('critical', 0) }}</div>
       <div class="delta">
         {{ stats.by_severity.get('high', 0) }} high · {{ stats.by_severity.get('medium', 0) }} medium
       </div>
@@ -250,7 +344,7 @@
           <td><span class="action {{ e.action }}">{{ e.action }}</span></td>
           <td class="model">{{ e.model }}</td>
           <td><span class="sev {{ e.severity }}">{{ e.severity }}</span></td>
-          <td class="score mono">{{ "%.2f"|format(e.score) }}</td>
+          <td class="score">{{ "%.2f"|format(e.score) }}</td>
           <td class="mono">{{ e.finding_count }}</td>
           <td class="snippet" title="{{ e.snippet }}">{{ e.snippet }}</td>
         </tr>
@@ -260,8 +354,15 @@
   </div>
   {% else %}
   <div class="empty">
-    <div class="icon">⚒️</div>
-    <div>No events yet — Mithril is online and waiting.</div>
+    <svg viewBox="0 0 48 48" fill="none">
+      <path d="M24 3 L42 13 L42 35 L24 45 L6 35 L6 13 Z"
+            stroke="url(#mithril-stroke)" stroke-width="1.6"
+            fill="url(#mithril-fill)" stroke-linejoin="round"/>
+      <path d="M15 30 L18 18 L24 26 L30 18 L33 30"
+            stroke="url(#mithril-stroke)" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>
+    <div class="title">Standing watch. No events yet.</div>
     <div class="hint">curl -X POST http://localhost:{{ settings.port }}/v1/scan -d '{"text":"hello"}'</div>
   </div>
   {% endif %}

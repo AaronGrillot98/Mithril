@@ -1,15 +1,19 @@
 <div align="center">
 
-# ⚒️ Mithril
+# Mithril
 
 ### A firewall for LLMs.
 
 **Block prompt injection, jailbreaks, and PII exfiltration in real time — with one line of config.**
 
+[![CI](https://github.com/AaronGrillot98/mithril/actions/workflows/ci.yml/badge.svg)](https://github.com/AaronGrillot98/mithril/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-21%20passing-brightgreen.svg)](#)
-[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](#)
+[![Status](https://img.shields.io/badge/status-alpha-silver.svg)](#)
+
+<br />
+
+![Mithril demo](docs/demo.gif)
 
 </div>
 
@@ -74,14 +78,36 @@ Add your own cases to `scripts/benchmark_data.jsonl` and rerun — PRs welcome.
 - **CLI for one-shot scans.** `mithril scan "ignore previous instructions..."`.
 - **Sub-millisecond per request.** Pure-regex pipeline, no model inference.
 
-## Quickstart
+## Install
+
+**Linux / macOS:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AaronGrillot98/mithril/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/AaronGrillot98/mithril/main/install.ps1 | iex
+```
+
+This drops Mithril into a private virtualenv (`~/.mithril/venv` on Linux/macOS, `%LOCALAPPDATA%\Mithril\venv` on Windows) and puts a `mithril` launcher on your PATH. Nothing leaks into your system Python.
+
+<details>
+<summary>Or install from source</summary>
 
 ```bash
 git clone https://github.com/AaronGrillot98/mithril
 cd mithril
 pip install -e .
 cp .env.example .env
+```
+</details>
 
+## Quickstart
+
+```bash
 mithril serve
 # → http://0.0.0.0:8080  (dashboard at /)
 ```
