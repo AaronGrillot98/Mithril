@@ -49,7 +49,7 @@ sys.path.insert(0, str(ROOT))
 
 from mithril.config import settings  # noqa: E402
 from mithril.detectors import default_pipeline  # noqa: E402
-from mithril.judges import build_judge  # noqa: E402
+from mithril.judges.openai_compat import OpenAICompatibleJudge  # noqa: E402
 
 CACHE_DIR = ROOT / "scripts" / "jbb_cache"
 HARMFUL_URL = (
@@ -193,7 +193,18 @@ async def evaluate(
     concurrency: int,
     wrap_harmful: bool = False,
 ) -> Report:
-    judge = build_judge(settings) if use_judge else None
+    # Build the judge directly when requested rather than mutating
+    # the global `settings.judge_enabled` flag — keeps test isolation clean.
+    judge = (
+        OpenAICompatibleJudge(
+            base_url=settings.judge_base_url,
+            model=settings.judge_model,
+            api_key=settings.judge_api_key,
+            timeout=settings.judge_timeout,
+        )
+        if use_judge
+        else None
+    )
     pipeline = default_pipeline(threshold=threshold, judge=judge)
     pipeline.judge_low = settings.judge_low_threshold
     pipeline.judge_high = settings.judge_high_threshold
@@ -354,10 +365,6 @@ async def amain() -> int:
             "  that doesn't require auth.\n",
             file=sys.stderr,
         )
-    if args.judge:
-        # The factory respects judge_enabled; force-enable so --judge wins.
-        settings.judge_enabled = True
-
     corpus = load_corpus()
     report = await evaluate(
         corpus,

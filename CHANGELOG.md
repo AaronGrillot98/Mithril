@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-05-16
+
+QA hardening pass. Six real bugs fixed, four 0%-coverage files brought to ~90% coverage, total coverage up from 58% → 77%. No new features.
+
+### Fixed
+
+- **Proxy no longer crashes on non-JSON upstream responses.** Previously, an HTML 502 from upstream would hit `httpx.Response.json()` and raise — leaking a 500 with traceback to the caller. Now the upstream response body, status, and content-type are forwarded verbatim. Network errors (`httpx.ConnectError` and friends) are caught and returned as a structured 502 with `{"error": {"type": "upstream_unreachable"}}`.
+- **`EventStore` no longer blocks the asyncio event loop.** New `arecord`/`arecent`/`astats` async wrappers offload SQLite I/O via `asyncio.to_thread`. The FastAPI server uses these. Sync API is preserved for the CLI / benchmark scripts.
+- **SQLite WAL mode** is enabled at init, so readers don't block writers. Added a `synchronous=NORMAL` pragma for further throughput. New `idx_events_severity` index speeds up `stats()` on large event logs.
+- **Request body size cap.** New `MITHRIL_MAX_BODY_BYTES` setting (default 1 MiB) prevents DoS via unbounded prompt buffering. Enforced on both `Content-Length` (rejected at header time) and actual bytes read (rejected mid-stream if a client lies about Content-Length).
+- **Streaming responses no longer leak upstream connections.** `StreamingResponse` now uses a `BackgroundTask(upstream_resp.aclose)` so the upstream connection is released when the client disconnects.
+- **Mutable class default on `_RuleDetector.rules`.** The base class previously declared `rules: list[Rule] = []`, which would have caused subclasses doing `self.rules.append(...)` to share state. Replaced with an immutable `tuple[Rule, ...] = ()` default and `_compile()` now returns a tuple.
+- **PII regexes anchored.** `PII003`/`PII004`/`PII005`/`PII006` now require a non-alphanumeric character (or start-of-string) immediately before the prefix, eliminating false positives on tokens embedded inside other strings (`MYsk-xxx`, `tokenghp_xxx`, etc.).
+- **Hop-by-hop / host-leaking headers stripped on forward.** `Host`, `Cookie`, `Content-Length`, and the standard hop-by-hop set are no longer forwarded to upstream providers. The header allow-list on upstream responses (`Content-Type`, rate-limit headers, `OpenAI-*`) is forwarded back to the client.
+
+### Added
+
+- **`MITHRIL_MAX_BODY_BYTES`** config setting.
+- **Pydantic validators on config thresholds.** Out-of-range values, inverted judge bands (`LOW >= HIGH`), invalid ports (`< 1 or > 65535`), non-positive judge timeouts, and tiny `max_body_bytes` (`< 1024`) all raise `ValidationError` at startup with a clear message — no more silent misconfiguration.
+- **44 new tests** across four new files: `tests/test_server.py` (proxy endpoints, body size, lifecycle, dashboard, error paths), `tests/test_storage.py` (CRUD, async wrappers, WAL, schema, corrupt-data tolerance), `tests/test_proxy.py` (forward, header filter, error propagation), `tests/test_config.py` (validation rejects bad values). Total: 112 tests.
+- **Coverage jumped 58% → 77%** overall, with `server.py` now at 91%, `storage.py` at 100%, `proxy.py` at 89%, and `pipeline.py` at 100%.
+
+### Changed
+
+- `scripts/jailbreakbench_eval.py` no longer mutates `settings.judge_enabled`. Constructs the judge directly when `--judge` is passed, preserving test isolation across in-process runs.
+
+### Backwards compatibility
+
+100%. Public API is unchanged. The new async wrappers on `EventStore` are additive; the sync API is preserved. Default config values are unchanged.
+
 ## [0.3.0] — 2026-05-16
 
 ### Added
@@ -93,7 +123,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - GitHub Actions CI: pytest + benchmark + ruff across Ubuntu/Windows × Python 3.10/3.11/3.12.
 - Demo GIF generator (`scripts/render_demo_gif.py`).
 
-[Unreleased]: https://github.com/AaronGrillot98/mithril/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/AaronGrillot98/mithril/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/AaronGrillot98/mithril/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/AaronGrillot98/mithril/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/AaronGrillot98/mithril/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/AaronGrillot98/mithril/compare/v0.2.0...v0.2.1

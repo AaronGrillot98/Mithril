@@ -23,15 +23,18 @@ class Rule:
     message: str
 
 
-def _compile(rules: list[tuple[str, str, Severity, float, str]]) -> list[Rule]:
-    return [
+def _compile(rules: list[tuple[str, str, Severity, float, str]]) -> tuple[Rule, ...]:
+    return tuple(
         Rule(rid, re.compile(pat, re.IGNORECASE | re.DOTALL), sev, conf, msg)
         for rid, pat, sev, conf, msg in rules
-    ]
+    )
 
 
 class _RuleDetector(Detector):
-    rules: list[Rule] = []
+    # Subclasses MUST override `rules` with their own compiled list. We use a
+    # ClassVar-style tuple sentinel as the default so any subclass that forgets
+    # gets a clean empty result instead of silently sharing a mutable list.
+    rules: tuple[Rule, ...] = ()
 
     def scan(self, text: str) -> list[Finding]:
         if not text:
@@ -244,28 +247,28 @@ class PIIDetector(_RuleDetector):
         ),
         (
             "PII003",
-            r"sk-[A-Za-z0-9]{20,}",
+            r"(?<![A-Za-z0-9])sk-[A-Za-z0-9]{20,}",
             "critical",
             0.98,
             "OpenAI-style API key.",
         ),
         (
             "PII004",
-            r"AKIA[0-9A-Z]{16}",
+            r"(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![A-Za-z0-9])",
             "critical",
             0.99,
             "AWS access key ID.",
         ),
         (
             "PII005",
-            r"ghp_[A-Za-z0-9]{30,}",
+            r"(?<![A-Za-z0-9])ghp_[A-Za-z0-9]{30,}",
             "critical",
             0.99,
             "GitHub personal access token.",
         ),
         (
             "PII006",
-            r"xox[abp]-[A-Za-z0-9-]{10,}",
+            r"(?<![A-Za-z0-9])xox[abp]-[A-Za-z0-9-]{10,}",
             "critical",
             0.98,
             "Slack token.",
