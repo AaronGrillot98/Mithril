@@ -1,0 +1,54 @@
+name: ⚔️ Attack pattern submission
+description: A novel jailbreak / injection / exfil pattern that Mithril misses.
+labels: ["detection", "good-first-issue"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        New attack patterns are how Mithril gets better. The faster we have a reproducible test case, the faster we can ship a rule.
+
+        **Tip:** the easiest PR is the one that ships with a rule and a test. See [CONTRIBUTING.md](https://github.com/AaronGrillot98/mithril/blob/main/CONTRIBUTING.md#adding-a-rule) for the format.
+  - type: textarea
+    id: prompt
+    attributes:
+      label: The attack prompt
+      description: The exact text that should have been blocked. Multiple variations are great.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: Pick the closest fit. If none match, choose "Other" and explain below.
+      options:
+        - Instruction override
+        - Jailbreak persona (DAN, AIM, STAN, etc.)
+        - Developer / debug-mode framing
+        - Role / token hijack (ChatML, [INST], etc.)
+        - System-prompt extraction
+        - PII / secret exfiltration
+        - Hypothetical / fictional framing
+        - Translation / encoding bypass
+        - Multi-turn / chained attack
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: Where did you see this?
+      description: Paper, blog post, in-the-wild log, original research. A URL is enough.
+    validations:
+      required: false
+  - type: textarea
+    id: target-models
+    attributes:
+      label: Which models does it work against?
+      description: Optional — if known.
+      placeholder: "GPT-4o-mini as of 2026-05; Claude 3.5 Sonnet; Llama 3.1 70B"
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional notes
+      description: Edge cases, variants, expected severity.

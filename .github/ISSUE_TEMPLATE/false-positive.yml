@@ -1,0 +1,34 @@
+name: 🟡 False positive
+description: A benign prompt that Mithril incorrectly blocks.
+labels: ["false-positive"]
+body:
+  - type: textarea
+    id: prompt
+    attributes:
+      label: The benign prompt
+      description: The exact text that should have been allowed.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: rule
+    attributes:
+      label: Which rule fired?
+      description: From the response — e.g. JB007, RH003. Multiple is fine.
+      placeholder: "JB007"
+    validations:
+      required: true
+  - type: textarea
+    id: why-benign
+    attributes:
+      label: Why is this benign?
+      description: One sentence on intent. Helps us tune the rule without losing real attacks.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Mithril version
+      placeholder: "0.2.0"
+    validations:
+      required: true

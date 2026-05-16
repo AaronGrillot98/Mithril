@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 Security vulnerability
+    url: https://github.com/AaronGrillot98/mithril/security/advisories/new
+    about: Privately report a security issue in Mithril itself. Do NOT file a public issue for these.
+  - name: 💬 Question or discussion
+    url: https://github.com/AaronGrillot98/mithril/discussions
+    about: General questions, configuration help, or design discussion.

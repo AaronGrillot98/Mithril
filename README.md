@@ -126,7 +126,22 @@ No data ever leaves your machine — the judge, the proxy, and the upstream mode
 
 ## Install
 
-**Linux / macOS:**
+**Docker (easiest):**
+
+```bash
+docker run -p 8080:8080 -e MITHRIL_UPSTREAM_URL=https://api.openai.com/v1 \
+  ghcr.io/aarongrillot98/mithril:latest
+# → http://localhost:8080  (dashboard at /)
+```
+
+Or with `docker compose` for persistent storage + env management:
+
+```bash
+git clone https://github.com/AaronGrillot98/mithril && cd mithril
+docker compose up
+```
+
+**Linux / macOS one-liner:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AaronGrillot98/mithril/main/install.sh | bash
@@ -138,7 +153,7 @@ curl -fsSL https://raw.githubusercontent.com/AaronGrillot98/mithril/main/install
 iwr -useb https://raw.githubusercontent.com/AaronGrillot98/mithril/main/install.ps1 | iex
 ```
 
-This drops Mithril into a private virtualenv (`~/.mithril/venv` on Linux/macOS, `%LOCALAPPDATA%\Mithril\venv` on Windows) and puts a `mithril` launcher on your PATH. Nothing leaks into your system Python.
+The shell installers drop Mithril into a private virtualenv (`~/.mithril/venv` on Linux/macOS, `%LOCALAPPDATA%\Mithril\venv` on Windows) and put a `mithril` launcher on your PATH. Nothing leaks into your system Python.
 
 <details>
 <summary>Or install from source</summary>
@@ -157,6 +172,12 @@ cp .env.example .env
 mithril serve
 # → http://0.0.0.0:8080  (dashboard at /)
 ```
+
+## Dashboard
+
+The proxy ships with a built-in dashboard at `/` — Mithril-themed UI, real-time stats, recent-event log with severity + score + the prompt that tripped each rule.
+
+![Mithril dashboard](docs/dashboard.png)
 
 Now point your existing OpenAI client at it:
 
@@ -273,7 +294,16 @@ Every rule is one line in [`mithril/detectors/heuristics.py`][heur] — fork it,
 pip install -e ".[dev]"
 pytest
 ruff check .
+python scripts/benchmark.py
 ```
+
+## Contributing
+
+PRs, attack-pattern submissions, and false-positive reports are all welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). For new attack patterns, the [Attack pattern submission](https://github.com/AaronGrillot98/mithril/issues/new?template=attack-pattern.yml) issue template gets you straight to a reproducible test case.
+
+## Security
+
+Found a vulnerability in Mithril itself? Please disclose it privately — see [SECURITY.md](SECURITY.md). Do not open a public issue.
 
 ## License
 
