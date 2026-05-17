@@ -41,20 +41,23 @@ class _RuleDetector(Detector):
             return []
         findings: list[Finding] = []
         for rule in self.rules:
-            match = rule.pattern.search(text)
-            if not match:
-                continue
-            excerpt = text[max(0, match.start() - 20) : match.end() + 20].strip()
-            findings.append(
-                Finding(
-                    detector=self.name,
-                    rule_id=rule.rule_id,
-                    severity=rule.severity,
-                    confidence=rule.confidence,
-                    message=rule.message,
-                    excerpt=excerpt[:200],
+            # Find ALL non-overlapping matches, not just the first — the output
+            # redactor needs every span if the same secret pattern occurs more
+            # than once in a response.
+            for match in rule.pattern.finditer(text):
+                excerpt = text[max(0, match.start() - 20) : match.end() + 20].strip()
+                findings.append(
+                    Finding(
+                        detector=self.name,
+                        rule_id=rule.rule_id,
+                        severity=rule.severity,
+                        confidence=rule.confidence,
+                        message=rule.message,
+                        excerpt=excerpt[:200],
+                        start=match.start(),
+                        end=match.end(),
+                    )
                 )
-            )
         return findings
 
 

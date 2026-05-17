@@ -42,6 +42,11 @@ class Finding(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     message: str
     excerpt: str = ""
+    # Character offsets into the scanned text. Used by the output redactor
+    # to rewrite the matched span. Default to 0 for backwards compatibility
+    # with any externally-constructed Finding (tests, integrations, etc.).
+    start: int = 0
+    end: int = 0
 
 
 JudgeVerdictKind = Literal["attack", "benign", "error"]
@@ -89,3 +94,51 @@ class BlockResponse(BaseModel):
         if result.judge is not None:
             body["judge"] = result.judge.model_dump()
         return cls(error=body)
+
+
+OutputAction = Literal["allow", "redact", "block"]
+
+
+class OutputScanResult(BaseModel):
+    """Result of scanning an LLM response for PII / secrets / leaks.
+
+    `redacted_text` is set when at least one finding fired AND the
+    configured mode is "redact" — it contains the original text with
+    matched spans replaced by `[REDACTED:<rule_id>]` markers.
+    """
+
+    action: OutputAction
+    score: float = Field(ge=0.0, le=1.0)
+    findings: list[Finding] = []
+    redacted_text: str | None = None
+
+    @property
+    def top_severity(self) -> Severity:
+        order: list[Severity] = ["critical", "high", "medium", "low", "info"]
+        seen = {f.severity for f in self.findings}
+        for s in order:
+            if s in seen:
+                return s
+        return "info"
+
+
+class OutputBlockResponse(BaseModel):
+    """Distinct error envelope when a response (not a request) is blocked.
+
+    Same shape as BlockResponse but with a different `type` so client-side
+    error handlers can tell input-blocks from output-blocks at a glance.
+    """
+
+    error: dict[str, Any]
+
+    @classmethod
+    def from_result(cls, result: OutputScanResult) -> "OutputBlockResponse":
+        return cls(
+            error={
+                "type": "mithril_output_blocked",
+                "message": "Response blocked by Mithril output filter.",
+                "score": result.score,
+                "severity": result.top_severity,
+                "findings": [f.model_dump() for f in result.findings],
+            }
+        )

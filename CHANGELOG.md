@@ -6,6 +6,51 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-05-16
+
+**Output scanning.** Completes the firewall metaphor: Mithril now scans both *user prompts* (attack technique) and *LLM responses* (PII / secret / credential leakage) before they reach the client.
+
+### Added
+
+- **`mithril.output` package** with two public exports:
+  - **`OutputScanner`** — orchestrates `PIIDetector` + `SecretsDetector` against a response body and produces an `OutputScanResult`. Configurable mode (`block` / `redact` / `log`), threshold, and redaction marker template.
+  - **`redact(text, findings, marker_format=…)`** — pure function that rewrites matched character spans into stable markers like `[REDACTED:PII003]`. Handles overlapping spans by preferring the longer one. Available as a standalone utility for custom integrations.
+- **Server-side wiring** in `mithril/server.py`:
+  - Non-streaming responses: parse `choices[].message.content`, scan, apply action.
+  - Streaming responses: buffer the entire SSE body, decode `delta.content` parts, scan as a whole, re-emit (clean SSE passthrough on allow, single redacted-content SSE message on redact, HTTP 403 on block). True incremental scanning is on the v0.5 roadmap.
+- **`OutputScanResult`** model — `action`, `score`, `findings`, optional `redacted_text`, plus a `top_severity` accessor.
+- **`OutputBlockResponse`** — distinct error envelope (`type: "mithril_output_blocked"`) so client error handlers can tell input-blocks from output-blocks at a glance.
+- **Four new `MITHRIL_OUTPUT_*` settings**: `_ENABLED`, `_MODE`, `_THRESHOLD`, `_MARKER`. Pydantic-validated; documented in `.env.example`.
+- **`Finding.start` / `Finding.end`** — character offsets into the scanned text. Required by the redactor. Default to 0 for backwards compatibility with externally-constructed `Finding` instances.
+- **`/health` surfaces output-scan config** under a new `output_scan` block.
+- **23 new tests** in `tests/test_output.py` covering the redactor, scanner modes, server integration (non-streaming and streaming), block-mode 403 envelope, backwards-compat when disabled, and the deliberate omission of jailbreak/role-hijack detectors from the output pipeline.
+
+### Changed
+
+- **`_RuleDetector.scan`** now uses `re.finditer` instead of `re.search` to enumerate every match of each rule. The aggregated block decision (max confidence) is unchanged; the redactor needs every span. No test or benchmark regression.
+
+### Coverage
+
+| Module | Before | After |
+|--------|--------|-------|
+| `output/redactor.py` | new | **96%** |
+| `output/scanner.py` | new | **97%** |
+| `output/__init__.py` | new | **100%** |
+| `proxy.py` | 89% | **100%** |
+| `server.py` | 91% | **91%** (more LOC, same coverage) |
+| **Total** | **86%** | **88%** |
+
+### Backwards compatibility
+
+100%. Output scanning defaults to disabled — v0.3.x deployments see zero behavior change. The `Finding.start`/`end` additions default to 0 so any pre-existing serialized findings (in event logs, integrations, etc.) deserialize cleanly.
+
+### Validation
+
+- 167/167 tests pass (was 144)
+- ruff clean
+- Internal benchmark: 100/100 (unchanged)
+- JailbreakBench wrapped: 100/100 recall + precision (unchanged)
+
 ## [0.3.2] — 2026-05-16
 
 Second hardening pass. Closes the remaining QA punch list left from v0.3.1.
@@ -151,7 +196,8 @@ QA hardening pass. Six real bugs fixed, four 0%-coverage files brought to ~90% c
 - GitHub Actions CI: pytest + benchmark + ruff across Ubuntu/Windows × Python 3.10/3.11/3.12.
 - Demo GIF generator (`scripts/render_demo_gif.py`).
 
-[Unreleased]: https://github.com/AaronGrillot98/mithril/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/AaronGrillot98/mithril/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/AaronGrillot98/mithril/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/AaronGrillot98/mithril/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/AaronGrillot98/mithril/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/AaronGrillot98/mithril/compare/v0.2.2...v0.3.0

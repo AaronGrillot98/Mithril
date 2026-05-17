@@ -49,6 +49,16 @@ class Settings(BaseSettings):
 
     judge_timeout: float = Field(default=5.0, gt=0.0, le=300.0)
 
+    # --- Output scanning (v0.4) ---------------------------------------------
+    # Scans the LLM's *response* (not the user's prompt) for PII, API keys,
+    # private keys, etc. Disabled by default so the v0.3.x behavior is
+    # preserved. When enabled, the streaming endpoint will buffer the full
+    # response before scanning — true incremental scanning lands in v0.5.
+    output_scan_enabled: bool = False
+    output_scan_mode: Literal["block", "redact", "log"] = "redact"
+    output_scan_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
+    output_scan_marker: str = "[REDACTED:{rule_id}]"
+
     @model_validator(mode="after")
     def _validate_judge_zone(self) -> "Settings":
         if self.judge_low_threshold >= self.judge_high_threshold:

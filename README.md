@@ -89,12 +89,46 @@ Add your own cases to [`scripts/benchmark_data.jsonl`](scripts/benchmark_data.js
 
 - **OpenAI-compatible drop-in.** Point your existing SDK at Mithril. No code changes.
 - **Two-stage defense.** Sub-millisecond regex catches the common attacks; an optional LLM judge handles the ambiguous middle.
+- **Bi-directional.** Scans both *user prompts* (attack technique) and *LLM responses* (PII/secret leakage), with block / redact / log modes on the output side.
 - **Layered detection.** Jailbreak personas (DAN, AIM, STAN, Developer Mode), instruction-override attacks, ChatML / Llama-INST role hijacks, system-prompt leak attempts, PII (SSN, credit cards, private keys), and credential exfil (OpenAI / AWS / GitHub / Slack tokens).
 - **Auditable.** Every rule is a single regex with a stable ID, severity, and confidence. No black-box model on the hot path.
 - **Two modes.** `block` (return HTTP 403 with a structured reason) or `log` (forward but record).
 - **Built-in dashboard.** Browse blocked requests, filter by severity, see what tripped.
 - **Streaming-safe.** Server-sent events pass through cleanly.
 - **CLI for one-shot scans.** `mithril scan "ignore previous instructions..."`.
+
+## Output scanning (v0.4)
+
+Mithril scans the LLM's *response* — not just the user's prompt — before forwarding it back to the client. Catches the cases where the model emits PII, API keys, private keys, or other sensitive material it was tricked or instructed into echoing.
+
+Off by default. Enable with one env var:
+
+```bash
+MITHRIL_OUTPUT_SCAN_ENABLED=true
+MITHRIL_OUTPUT_SCAN_MODE=redact      # or "block" / "log"
+```
+
+Three modes:
+
+| Mode     | Behavior on a hit                                                  |
+| -------- | ------------------------------------------------------------------ |
+| `block`  | Return HTTP 403 with a structured `mithril_output_blocked` error.  |
+| `redact` | Pass response through but replace matched spans with `[REDACTED:<rule_id>]`. |
+| `log`    | Pass response through unchanged; record the event for auditing.    |
+
+Example (redact mode):
+
+```python
+# Upstream returns:
+{"choices": [{"message": {"content": "Your SSN is 123-45-6789. Don't share it."}}]}
+
+# Client receives:
+{"choices": [{"message": {"content": "Your SSN is [REDACTED:PII001]. Don't share it."}}]}
+```
+
+The output scanner uses the same `PIIDetector` and `SecretsDetector` as the input side — but **not** the jailbreak / role-hijack / prompt-leak detectors. Those target attacker *technique* in user inputs; flagging them in model responses would false-positive every time the model legitimately discussed prompt injection as a topic.
+
+**Streaming** is supported via buffer-then-scan: the entire SSE stream is collected, scanned as a whole, and re-emitted. This sacrifices true incremental UX for safety; chunk-by-chunk scanning is on the v0.5 roadmap.
 
 ## Two-stage defense (v0.2)
 
@@ -341,6 +375,15 @@ All settings via env vars or `.env`:
 | `MITHRIL_JUDGE_FAIL_MODE`         | `open`                         | `open` or `closed` on judge errors.      |
 | `MITHRIL_JUDGE_TIMEOUT`           | `5.0`                          | Seconds before the judge call gives up.  |
 
+**Output scanning (v0.4)**
+
+| Variable                          | Default                        | Description                              |
+| --------------------------------- | ------------------------------ | ---------------------------------------- |
+| `MITHRIL_OUTPUT_SCAN_ENABLED`     | `false`                        | Master switch.                           |
+| `MITHRIL_OUTPUT_SCAN_MODE`        | `redact`                       | `block`, `redact`, or `log`.             |
+| `MITHRIL_OUTPUT_SCAN_THRESHOLD`   | `0.7`                          | Min confidence to take action.           |
+| `MITHRIL_OUTPUT_SCAN_MARKER`      | `[REDACTED:{rule_id}]`         | Marker template for redact mode. Supports `{rule_id}`, `{detector}`, `{severity}`. |
+
 Works out of the box with any OpenAI-compatible API — OpenAI, Anthropic (via shim), Ollama, Together, Groq, vLLM, llama.cpp, LM Studio.
 
 ## Detection coverage (v0.1)
@@ -363,8 +406,8 @@ Every rule is one line in [`mithril/detectors/heuristics.py`][heur] — fork it,
 - [x] **v0.2** — LLM-judge fallback for ambiguous requests (OpenAI / Anthropic / Ollama / vLLM / Together / Groq).
 - [x] **v0.2.2** — Published precision/recall against the full [JailbreakBench] corpus (100% / 100% on jailbreak-framed attacks; 0 false positives on benign).
 - [x] **v0.3** — LangChain / LiteLLM / FastAPI integrations (drop-in firewalls for the three biggest LLM stacks).
-- [ ] **v0.4** — Output scanning (catch the model leaking PII in *responses*).
-- [ ] **v0.5** — Embedding-based similarity to known jailbreak corpora (GCG, AdvSuffix).
+- [x] **v0.4** — Output scanning. Catches PII / secrets / credentials the model emits in responses. Three modes: block, redact, log.
+- [ ] **v0.5** — Incremental output scanning for streaming responses (chunk-by-chunk instead of buffer-then-scan); embedding-based similarity to known jailbreak corpora (GCG, AdvSuffix).
 - [ ] **v0.6** — Per-route policies (different thresholds for different endpoints).
 - [ ] **v1.0** — Published precision/recall against [Garak] as well.
 

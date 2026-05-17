@@ -17,7 +17,14 @@ from mithril.config import settings
 from mithril.detectors import default_pipeline
 from mithril.judges import build_judge
 from mithril.middleware import RequestIDMiddleware
-from mithril.models import BlockResponse, ChatCompletionRequest, DetectionResult
+from mithril.models import (
+    BlockResponse,
+    ChatCompletionRequest,
+    DetectionResult,
+    OutputBlockResponse,
+    OutputScanResult,
+)
+from mithril.output import default_output_scanner
 from mithril.proxy import UpstreamClient
 from mithril.storage import EventStore
 
@@ -74,6 +81,15 @@ async def lifespan(app: FastAPI):
     app.state.pipeline.fail_mode = settings.judge_fail_mode
     app.state.upstream = UpstreamClient(settings.upstream_url)
     app.state.store = EventStore(settings.db_path)
+    app.state.output_scanner = (
+        default_output_scanner(
+            threshold=settings.output_scan_threshold,
+            mode=settings.output_scan_mode,
+            marker_format=settings.output_scan_marker,
+        )
+        if settings.output_scan_enabled
+        else None
+    )
     yield
     await app.state.upstream.aclose()
     await app.state.pipeline.aclose()
@@ -104,6 +120,11 @@ async def health() -> dict[str, Any]:
             "low": settings.judge_low_threshold,
             "high": settings.judge_high_threshold,
             "fail_mode": settings.judge_fail_mode,
+        },
+        "output_scan": {
+            "enabled": settings.output_scan_enabled,
+            "mode": settings.output_scan_mode if settings.output_scan_enabled else None,
+            "threshold": settings.output_scan_threshold,
         },
     }
 
@@ -216,8 +237,22 @@ async def chat_completions(request: Request) -> Any:
     headers = _build_upstream_headers(request.headers)
 
     if parsed.stream:
-        return await _proxy_stream(app.state.upstream, body, headers)
-    return await _proxy_blocking(app.state.upstream, body, headers)
+        return await _proxy_stream(
+            app.state.upstream,
+            body,
+            headers,
+            output_scanner=app.state.output_scanner,
+            store=app.state.store,
+            model=parsed.model,
+        )
+    return await _proxy_blocking(
+        app.state.upstream,
+        body,
+        headers,
+        output_scanner=app.state.output_scanner,
+        store=app.state.store,
+        model=parsed.model,
+    )
 
 
 def _build_upstream_headers(incoming: Any) -> dict[str, str]:
@@ -237,11 +272,21 @@ def _filter_response_headers(headers: httpx.Headers) -> dict[str, str]:
     }
 
 
-async def _proxy_blocking(upstream: UpstreamClient, body: dict[str, Any], headers: dict[str, str]) -> Response:
-    """Forward a non-streaming request and return the upstream response verbatim.
+async def _proxy_blocking(
+    upstream: UpstreamClient,
+    body: dict[str, Any],
+    headers: dict[str, str],
+    *,
+    output_scanner: Any = None,
+    store: EventStore | None = None,
+    model: str = "",
+) -> Response:
+    """Forward a non-streaming request and return the upstream response.
 
-    Importantly: if upstream returns a non-JSON body (HTML 502, etc.) we pass
-    bytes + content-type through unchanged instead of crashing on json().
+    If output scanning is enabled and the response is valid JSON in the
+    OpenAI chat-completions shape, scan ``choices[].message.content`` and
+    apply the configured action (block / redact / log). If upstream returns
+    a non-JSON body (HTML 502, etc.) we pass it through unchanged.
     """
     try:
         upstream_resp = await upstream.forward_chat(body, headers)
@@ -251,16 +296,123 @@ async def _proxy_blocking(upstream: UpstreamClient, body: dict[str, Any], header
             status_code=502,
             content={"error": {"type": "upstream_unreachable", "message": str(exc)}},
         )
+
+    content_bytes = upstream_resp.content
+    if output_scanner is not None and upstream_resp.status_code == 200:
+        content_bytes = await _apply_output_scan_blocking(
+            content_bytes, output_scanner, store, model
+        )
+        if isinstance(content_bytes, Response):
+            return content_bytes
+
     return Response(
-        content=upstream_resp.content,
+        content=content_bytes,
         status_code=upstream_resp.status_code,
         headers=_filter_response_headers(upstream_resp.headers),
         media_type=upstream_resp.headers.get("content-type"),
     )
 
 
-async def _proxy_stream(upstream: UpstreamClient, body: dict[str, Any], headers: dict[str, str]) -> Response:
-    """Forward a streaming request and proxy the upstream byte stream back."""
+async def _apply_output_scan_blocking(
+    content_bytes: bytes,
+    scanner: Any,
+    store: EventStore | None,
+    model: str,
+) -> bytes | Response:
+    """Scan a non-streaming chat completion response.
+
+    Returns either the (possibly rewritten) body bytes to forward, or a
+    Response object the caller should return directly when the output was
+    blocked.
+    """
+    import json as _json
+
+    try:
+        payload = _json.loads(content_bytes)
+    except _json.JSONDecodeError:
+        return content_bytes
+
+    if not isinstance(payload, dict) or not isinstance(payload.get("choices"), list):
+        return content_bytes
+
+    # Aggregate text across all choices/messages so one scan covers the
+    # whole response. Track which choice each text belonged to so we can
+    # rewrite in place on redact.
+    texts: list[tuple[int, str]] = []
+    for i, choice in enumerate(payload["choices"]):
+        msg = choice.get("message") if isinstance(choice, dict) else None
+        if isinstance(msg, dict):
+            content = msg.get("content")
+            if isinstance(content, str) and content:
+                texts.append((i, content))
+
+    if not texts:
+        return content_bytes
+
+    combined = "\n\n".join(t for _, t in texts)
+    result: OutputScanResult = scanner.scan(combined)
+
+    if result.action == "allow":
+        return content_bytes
+
+    if result.action == "block":
+        if store is not None:
+            from mithril.models import DetectionResult
+
+            await store.arecord(
+                action="block",
+                model=model,
+                result=DetectionResult(
+                    blocked=True, score=result.score, findings=result.findings
+                ),
+                snippet=f"[output] {combined[:120]}",
+            )
+        return JSONResponse(
+            status_code=403,
+            content=OutputBlockResponse.from_result(result).model_dump(),
+        )
+
+    # redact — rewrite each choice's content individually so we don't
+    # mangle structure. We re-scan each choice text instead of slicing the
+    # combined redaction, because indexes in `result.findings` are relative
+    # to the combined buffer.
+    if result.redacted_text is not None:
+        for i, original in texts:
+            sub_result = scanner.scan(original)
+            if sub_result.redacted_text is not None:
+                payload["choices"][i]["message"]["content"] = sub_result.redacted_text
+        if store is not None:
+            from mithril.models import DetectionResult
+
+            await store.arecord(
+                action="log",
+                model=model,
+                result=DetectionResult(
+                    blocked=False, score=result.score, findings=result.findings
+                ),
+                snippet=f"[output redacted] {combined[:120]}",
+            )
+        return _json.dumps(payload).encode("utf-8")
+
+    return content_bytes
+
+
+async def _proxy_stream(
+    upstream: UpstreamClient,
+    body: dict[str, Any],
+    headers: dict[str, str],
+    *,
+    output_scanner: Any = None,
+    store: EventStore | None = None,
+    model: str = "",
+) -> Response:
+    """Forward a streaming request and proxy the upstream byte stream back.
+
+    When output scanning is enabled, this falls back to buffer-then-scan
+    mode: the entire SSE stream is collected into memory, scanned as a
+    whole, and only then re-emitted. This sacrifices streaming UX for
+    safety; true incremental scanning is on the v0.5 roadmap.
+    """
     try:
         upstream_resp = await upstream.forward_stream(body, headers)
     except httpx.HTTPError as exc:
@@ -269,13 +421,130 @@ async def _proxy_stream(upstream: UpstreamClient, body: dict[str, Any], headers:
             status_code=502,
             content={"error": {"type": "upstream_unreachable", "message": str(exc)}},
         )
-    return StreamingResponse(
-        upstream_resp.aiter_raw(),
+
+    if output_scanner is None:
+        return StreamingResponse(
+            upstream_resp.aiter_raw(),
+            status_code=upstream_resp.status_code,
+            headers=_filter_response_headers(upstream_resp.headers),
+            media_type=upstream_resp.headers.get("content-type", "text/event-stream"),
+            background=BackgroundTask(upstream_resp.aclose),
+        )
+
+    return await _buffered_stream_with_scan(upstream_resp, output_scanner, store, model)
+
+
+async def _buffered_stream_with_scan(
+    upstream_resp: httpx.Response,
+    scanner: Any,
+    store: EventStore | None,
+    model: str,
+) -> Response:
+    """Buffer an SSE stream, scan it, then re-emit (possibly redacted)."""
+    try:
+        # `aread()` works whether or not the response was started in stream
+        # mode — it's the safest way to fully drain the body once.
+        full = await upstream_resp.aread()
+    finally:
+        await upstream_resp.aclose()
+
+    accumulated = _extract_sse_content(full)
+
+    if not accumulated:
+        return Response(
+            content=full,
+            status_code=upstream_resp.status_code,
+            headers=_filter_response_headers(upstream_resp.headers),
+            media_type=upstream_resp.headers.get("content-type", "text/event-stream"),
+        )
+
+    result: OutputScanResult = scanner.scan(accumulated)
+
+    if result.action == "block":
+        if store is not None:
+            from mithril.models import DetectionResult
+
+            await store.arecord(
+                action="block",
+                model=model,
+                result=DetectionResult(
+                    blocked=True, score=result.score, findings=result.findings
+                ),
+                snippet=f"[output stream] {accumulated[:120]}",
+            )
+        return JSONResponse(
+            status_code=403,
+            content=OutputBlockResponse.from_result(result).model_dump(),
+        )
+
+    if result.action == "redact":
+        if store is not None:
+            from mithril.models import DetectionResult
+
+            await store.arecord(
+                action="log",
+                model=model,
+                result=DetectionResult(
+                    blocked=False, score=result.score, findings=result.findings
+                ),
+                snippet=f"[output stream redacted] {accumulated[:120]}",
+            )
+        return _build_redacted_sse_response(
+            result.redacted_text or accumulated, upstream_resp
+        )
+
+    return Response(
+        content=full,
         status_code=upstream_resp.status_code,
         headers=_filter_response_headers(upstream_resp.headers),
         media_type=upstream_resp.headers.get("content-type", "text/event-stream"),
-        # Critical: close the upstream response when the client disconnects.
-        background=BackgroundTask(upstream_resp.aclose),
+    )
+
+
+def _extract_sse_content(raw: bytes) -> str:
+    """Concatenate every ``delta.content`` string in an SSE stream."""
+    import json as _json
+
+    parts: list[str] = []
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if not data or data == "[DONE]":
+            continue
+        try:
+            obj = _json.loads(data)
+        except _json.JSONDecodeError:
+            continue
+        for choice in obj.get("choices", []) if isinstance(obj, dict) else []:
+            delta = choice.get("delta") if isinstance(choice, dict) else None
+            if isinstance(delta, dict):
+                content = delta.get("content")
+                if isinstance(content, str):
+                    parts.append(content)
+    return "".join(parts)
+
+
+def _build_redacted_sse_response(redacted: str, upstream_resp: httpx.Response) -> Response:
+    """Emit the redacted content as a single non-chunked SSE message + [DONE]."""
+    import json as _json
+
+    chunk = {
+        "id": "mithril-redacted",
+        "object": "chat.completion.chunk",
+        "choices": [
+            {"index": 0, "delta": {"role": "assistant", "content": redacted}, "finish_reason": "stop"}
+        ],
+    }
+    body = (
+        f"data: {_json.dumps(chunk)}\n\n".encode("utf-8")
+        + b"data: [DONE]\n\n"
+    )
+    return Response(
+        content=body,
+        status_code=upstream_resp.status_code,
+        headers=_filter_response_headers(upstream_resp.headers),
+        media_type=upstream_resp.headers.get("content-type", "text/event-stream"),
     )
 
 
