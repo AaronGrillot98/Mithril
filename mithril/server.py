@@ -24,7 +24,7 @@ from mithril.models import (
     OutputBlockResponse,
     OutputScanResult,
 )
-from mithril.output import default_output_scanner
+from mithril.output import IncrementalStreamScanner, default_output_scanner
 from mithril.proxy import UpstreamClient
 from mithril.storage import EventStore
 
@@ -72,9 +72,37 @@ _FORWARD_RESPONSE_HEADERS = frozenset({
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     judge = build_judge(settings)
+
+    extra_detectors: list[Any] = []
+    if settings.embedding_enabled:
+        try:
+            from mithril.embeddings import EmbeddingSimilarityDetector
+
+            corpus_path = settings.embedding_corpus_path or None
+            extra_detectors.append(
+                EmbeddingSimilarityDetector(
+                    corpus_path=corpus_path,
+                    model_name=settings.embedding_model,
+                    threshold=settings.embedding_threshold,
+                )
+            )
+            logger.info(
+                "Embedding similarity detector enabled (model=%s, threshold=%s)",
+                settings.embedding_model,
+                settings.embedding_threshold,
+            )
+        except ImportError as exc:
+            logger.warning(
+                "MITHRIL_EMBEDDING_ENABLED=true but the [embeddings] extra is not "
+                "installed (%s). Continuing without embedding detection. "
+                "Install with: pip install mithril-llm[embeddings]",
+                exc,
+            )
+
     app.state.pipeline = default_pipeline(
         threshold=settings.threshold,
         judge=judge,
+        extra_detectors=extra_detectors,
     )
     app.state.pipeline.judge_low = settings.judge_low_threshold
     app.state.pipeline.judge_high = settings.judge_high_threshold
@@ -327,6 +355,26 @@ async def _apply_output_scan_blocking(
     """
     import json as _json
 
+    if len(content_bytes) > settings.max_response_bytes:
+        logger.warning(
+            "upstream response exceeded max_response_bytes (%d > %d); refusing to scan",
+            len(content_bytes),
+            settings.max_response_bytes,
+        )
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": {
+                    "type": "response_too_large",
+                    "message": (
+                        f"Upstream response exceeded {settings.max_response_bytes} bytes; "
+                        "Mithril refused to scan it. Raise MITHRIL_MAX_RESPONSE_BYTES "
+                        "if this was intentional."
+                    ),
+                }
+            },
+        )
+
     try:
         payload = _json.loads(content_bytes)
     except _json.JSONDecodeError:
@@ -357,8 +405,6 @@ async def _apply_output_scan_blocking(
 
     if result.action == "block":
         if store is not None:
-            from mithril.models import DetectionResult
-
             await store.arecord(
                 action="block",
                 model=model,
@@ -382,8 +428,6 @@ async def _apply_output_scan_blocking(
             if sub_result.redacted_text is not None:
                 payload["choices"][i]["message"]["content"] = sub_result.redacted_text
         if store is not None:
-            from mithril.models import DetectionResult
-
             await store.arecord(
                 action="log",
                 model=model,
@@ -431,7 +475,83 @@ async def _proxy_stream(
             background=BackgroundTask(upstream_resp.aclose),
         )
 
+    # Incremental mode preserves streaming UX. It works for block + log but
+    # falls back to buffer-then-scan for redact (true streaming redaction
+    # needs trail-buffer logic — v0.6 roadmap).
+    can_incremental = (
+        settings.output_scan_stream_mode == "incremental"
+        and output_scanner.mode in {"block", "log"}
+    )
+    if can_incremental:
+        return await _incremental_stream_with_scan(
+            upstream_resp, output_scanner, store, model
+        )
     return await _buffered_stream_with_scan(upstream_resp, output_scanner, store, model)
+
+
+async def _incremental_stream_with_scan(
+    upstream_resp: httpx.Response,
+    scanner: Any,
+    store: EventStore | None,
+    model: str,
+) -> Response:
+    """Forward the upstream stream chunk-by-chunk while scanning in the
+    background. Truly streaming — no buffer-then-scan UX hit.
+
+    Supports ``block`` (cuts the stream on a hit) and ``log`` (records
+    findings without altering the stream). ``redact`` is dispatched to
+    the buffered path before we get here.
+    """
+    incremental = IncrementalStreamScanner(scanner=scanner, mode=scanner.mode)
+
+    async def source() -> Any:
+        # Bound the total stream size to prevent OOM, same as the buffered
+        # path. We track total bytes seen and bail with an empty stream if
+        # exceeded; the client gets a clean truncation.
+        total = 0
+        try:
+            async for chunk in upstream_resp.aiter_raw():
+                total += len(chunk)
+                if total > settings.max_response_bytes:
+                    logger.warning(
+                        "upstream stream exceeded max_response_bytes (> %d); aborting",
+                        settings.max_response_bytes,
+                    )
+                    return
+                yield chunk
+        except httpx.StreamConsumed:
+            # MockTransport / pre-buffered response.
+            content = upstream_resp.content
+            if len(content) <= settings.max_response_bytes:
+                yield content
+
+    async def relay() -> Any:
+        try:
+            async for emitted in incremental.process_chunks(source()):
+                yield emitted
+        finally:
+            # After the stream ends, run a final scan so log-mode catches
+            # whatever was below the scan-interval threshold at the very end.
+            result = await incremental.finalize()
+            if store is not None and result is not None and result.findings:
+                await store.arecord(
+                    action="log" if not incremental._state.blocked else "block",
+                    model=model,
+                    result=DetectionResult(
+                        blocked=incremental._state.blocked,
+                        score=result.score,
+                        findings=result.findings,
+                    ),
+                    snippet=f"[output stream] {incremental._state.accumulated[:120]}",
+                )
+            await upstream_resp.aclose()
+
+    return StreamingResponse(
+        relay(),
+        status_code=upstream_resp.status_code,
+        headers=_filter_response_headers(upstream_resp.headers),
+        media_type=upstream_resp.headers.get("content-type", "text/event-stream"),
+    )
 
 
 async def _buffered_stream_with_scan(
@@ -441,12 +561,27 @@ async def _buffered_stream_with_scan(
     model: str,
 ) -> Response:
     """Buffer an SSE stream, scan it, then re-emit (possibly redacted)."""
-    try:
-        # `aread()` works whether or not the response was started in stream
-        # mode — it's the safest way to fully drain the body once.
-        full = await upstream_resp.aread()
-    finally:
-        await upstream_resp.aclose()
+    full, too_large = await _drain_with_cap(upstream_resp, settings.max_response_bytes)
+
+    if too_large:
+        logger.warning(
+            "upstream stream exceeded max_response_bytes (> %d); aborting",
+            settings.max_response_bytes,
+        )
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": {
+                    "type": "response_too_large",
+                    "message": (
+                        f"Upstream stream exceeded {settings.max_response_bytes} bytes "
+                        "while output scanning was enabled. Raise "
+                        "MITHRIL_MAX_RESPONSE_BYTES or disable output scanning if this "
+                        "was intentional."
+                    ),
+                }
+            },
+        )
 
     accumulated = _extract_sse_content(full)
 
@@ -462,8 +597,6 @@ async def _buffered_stream_with_scan(
 
     if result.action == "block":
         if store is not None:
-            from mithril.models import DetectionResult
-
             await store.arecord(
                 action="block",
                 model=model,
@@ -479,8 +612,6 @@ async def _buffered_stream_with_scan(
 
     if result.action == "redact":
         if store is not None:
-            from mithril.models import DetectionResult
-
             await store.arecord(
                 action="log",
                 model=model,
@@ -499,6 +630,43 @@ async def _buffered_stream_with_scan(
         headers=_filter_response_headers(upstream_resp.headers),
         media_type=upstream_resp.headers.get("content-type", "text/event-stream"),
     )
+
+
+async def _drain_with_cap(
+    upstream_resp: httpx.Response, cap: int
+) -> tuple[bytes, bool]:
+    """Drain an httpx Response body into bytes, enforcing a size cap.
+
+    Returns ``(full_bytes, too_large)``. When ``too_large`` is True the caller
+    should not use the bytes. The upstream response is closed on every path.
+
+    Works against both real streamed responses and pre-buffered ones (e.g.
+    ``httpx.MockTransport``), which raise ``StreamConsumed`` from
+    ``aiter_raw()``. In the pre-buffered case we fall back to ``.content``
+    and apply the cap post-hoc.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    too_large = False
+    try:
+        try:
+            async for chunk in upstream_resp.aiter_raw():
+                total += len(chunk)
+                if total > cap:
+                    too_large = True
+                    break
+                chunks.append(chunk)
+        except httpx.StreamConsumed:
+            content = upstream_resp.content
+            if len(content) > cap:
+                too_large = True
+            else:
+                chunks = [content]
+                total = len(content)
+    finally:
+        await upstream_resp.aclose()
+
+    return (b"" if too_large else b"".join(chunks)), too_large
 
 
 def _extract_sse_content(raw: bytes) -> str:

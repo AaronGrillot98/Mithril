@@ -58,6 +58,32 @@ def test_max_body_bytes_minimum_enforced(monkeypatch):
         Settings()
 
 
+def test_max_response_bytes_minimum_enforced(monkeypatch):
+    monkeypatch.setenv("MITHRIL_MAX_RESPONSE_BYTES", "100")
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_output_scan_marker_with_malformed_placeholder_rejected(monkeypatch):
+    monkeypatch.setenv("MITHRIL_OUTPUT_SCAN_MARKER", "[X:{rule_id")  # missing closing brace
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_output_scan_marker_with_unknown_placeholder_rejected(monkeypatch):
+    monkeypatch.setenv("MITHRIL_OUTPUT_SCAN_MARKER", "[X:{nonexistent}]")
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_output_scan_marker_with_valid_placeholders_loads(monkeypatch):
+    monkeypatch.setenv(
+        "MITHRIL_OUTPUT_SCAN_MARKER", "<<{detector}/{rule_id} @ {severity}>>"
+    )
+    s = Settings()
+    assert "{detector}" in s.output_scan_marker
+
+
 def test_valid_custom_config_loads(monkeypatch):
     monkeypatch.setenv("MITHRIL_THRESHOLD", "0.85")
     monkeypatch.setenv("MITHRIL_JUDGE_LOW_THRESHOLD", "0.3")

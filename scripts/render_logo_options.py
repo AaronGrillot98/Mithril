@@ -242,22 +242,16 @@ def logo_c(size: int = 480) -> Image.Image:
     cdraw.line([(mx_left, my_top), (cx, valley_y)], fill=255, width=stroke)
     cdraw.line([(mx_right, my_top), (cx, valley_y)], fill=255, width=stroke)
 
-    # Apply the cut as transparency to the shield layer
+    # Composite background + halo + masked shield (with the M cut out)
     base = Image.new("RGB", img.size, BG_0)
     glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
     ImageDraw.Draw(glow).polygon(shield, fill=(*MOON, 60))
     glow = glow.filter(ImageFilter.GaussianBlur(radius=32))
     base.paste(glow, (0, 0), glow)
 
-    # Build masked shield
-    shield_mask = smask.copy()
-    # Subtract the cut from the mask
-    shield_mask = Image.eval(shield_mask, lambda v: v)
-    composite = Image.composite(shield_layer, Image.new("RGBA", img.size, (0, 0, 0, 0)), shield_mask)
-    final_mask = Image.eval(shield_mask, lambda v: v) if False else shield_mask
-    # Better: knock cut out of shield_mask
+    # Knock the M cut out of the shield mask, then paste the gradient through it.
     cut_inv = Image.eval(cut, lambda v: 255 - v)
-    shield_mask = Image.composite(shield_mask, Image.new("L", img.size, 0), cut_inv)
+    shield_mask = Image.composite(smask, Image.new("L", img.size, 0), cut_inv)
 
     final = base.copy()
     final.paste(shield_layer, (0, 0), shield_mask)

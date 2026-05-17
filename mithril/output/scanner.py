@@ -7,6 +7,7 @@ from typing import Literal
 from mithril.detectors.base import Detector
 from mithril.detectors.heuristics import PIIDetector, SecretsDetector
 from mithril.models import Finding, OutputScanResult
+from mithril.output.redactor import redact
 
 
 OutputMode = Literal["block", "redact", "log"]
@@ -60,8 +61,6 @@ class OutputScanner:
             return OutputScanResult(action="allow", score=score, findings=findings)
 
         # redact mode (default)
-        from mithril.output.redactor import redact
-
         redacted = redact(text, findings, marker_format=self.marker_format)
         return OutputScanResult(
             action="redact",

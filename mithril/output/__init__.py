@@ -25,5 +25,11 @@ Public API:
 
 from mithril.output.redactor import redact
 from mithril.output.scanner import OutputScanner, default_output_scanner
+from mithril.output.streaming import IncrementalStreamScanner
 
-__all__ = ["OutputScanner", "default_output_scanner", "redact"]
+__all__ = [
+    "IncrementalStreamScanner",
+    "OutputScanner",
+    "default_output_scanner",
+    "redact",
+]

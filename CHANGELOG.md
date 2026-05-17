@@ -6,6 +6,83 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-05-16
+
+Two new defense capabilities. The proxy can now run a third detection layer
+beyond regex + judge, and streaming responses get scanned without buffering
+the entire body first.
+
+### Added
+
+- **`mithril.embeddings.EmbeddingSimilarityDetector`** — third defense layer.
+  Catches prompts that don't trip any regex but are semantically close to a
+  canonical jailbreak (paraphrased DAN, reworded instruction overrides,
+  etc.). Sits as a regular `Detector` in the pipeline; its confidence
+  contributes to the same `max(confidence)` aggregation.
+  - Bundled corpus at [`mithril/embeddings/corpus.jsonl`](mithril/embeddings/corpus.jsonl) — 50 canonical
+    jailbreak prompts across persona, instruction-override, developer-mode,
+    grandma, evil-AI, roleplay, prompt-leak, role-hijack, obfuscation, and
+    authority-impersonation categories. Forkable.
+  - Default model: `sentence-transformers/all-MiniLM-L6-v2` (~90 MB).
+    Loads once at proxy startup. Configurable via
+    `MITHRIL_EMBEDDING_MODEL`.
+  - Pluggable encoder for tests (deterministic fake) — the real
+    `sentence-transformers` dependency is optional via the new
+    `[embeddings]` extra. Graceful degradation when not installed:
+    logs a warning and acts as a no-op detector.
+- **Incremental streaming output scan** (`mithril/output/streaming.py`).
+  When `output_scan_enabled` is true and the request is a stream:
+  - `block` mode: forward chunks as they arrive while a background
+    accumulator scans them. On the first finding above threshold, emit a
+    final `mithril_output_blocked` SSE event and close.
+  - `log` mode: forward chunks unchanged; record findings to the event log.
+  - `redact` mode: still goes through buffer-then-scan (v0.4 behavior).
+    True streaming redaction needs trail-buffer logic — v0.6 roadmap.
+  - The upstream `[DONE]` terminator is stripped on the way out and
+    replaced with a single one we control, so real OpenAI-SSE clients
+    don't stop reading before our error event reaches them.
+- **`MITHRIL_OUTPUT_SCAN_STREAM_MODE`** config setting: `incremental` (new
+  default) or `buffer` (v0.4 behavior, retained as fallback).
+- **`MITHRIL_EMBEDDING_ENABLED` / `_MODEL` / `_THRESHOLD` / `_CORPUS_PATH`**
+  config settings.
+- **`MITHRIL_MAX_RESPONSE_BYTES`** — caps the upstream response size to
+  prevent OOM when output scanning is enabled. Default 4 MiB. Both the
+  non-streaming and streaming paths now refuse to scan responses larger
+  than this and return HTTP 502 `{"error": {"type": "response_too_large"}}`.
+- 24 new tests across `test_streaming_scan.py` (chunk handling, block-mode
+  cut, log-mode passthrough, mid-line chunk splits, scan throttling, server
+  integration) and `test_embeddings.py` (detection plumbing, threshold,
+  confidence scaling, span coverage, graceful degradation, default-corpus
+  smoke, pipeline integration).
+- `default_pipeline(extra_detectors=...)` accepts arbitrary additional
+  detectors so callers can plug in the embedding layer (or their own).
+
+### Fixed (QA pass)
+
+- `MITHRIL_OUTPUT_SCAN_MARKER` is now validated at startup. A malformed
+  format string (e.g. missing closing brace) raises `ValidationError`
+  with a clear message instead of crashing on the first response that
+  needs redaction.
+- Removed five redundant `from mithril.models import DetectionResult`
+  imports inside server functions; the module top-level import already
+  covers them.
+- Moved the lazy `from mithril.output.redactor import redact` out of
+  `OutputScanner.scan` to module level (no circular-import concern).
+- Cleaned up dead code in `scripts/render_logo_options.py` (option-C
+  iteration leftovers).
+
+### Backwards compatibility
+
+100%. Both new features default to disabled. Existing v0.4 deployments
+see zero behavior change.
+
+### Validation
+
+- **191 tests pass** (was 167)
+- ruff clean
+- internal benchmark 100/100 (unchanged)
+- JailbreakBench wrapped: 100/100 recall + precision (unchanged)
+
 ## [0.4.0] — 2026-05-16
 
 **Output scanning.** Completes the firewall metaphor: Mithril now scans both *user prompts* (attack technique) and *LLM responses* (PII / secret / credential leakage) before they reach the client.
@@ -196,7 +273,8 @@ QA hardening pass. Six real bugs fixed, four 0%-coverage files brought to ~90% c
 - GitHub Actions CI: pytest + benchmark + ruff across Ubuntu/Windows × Python 3.10/3.11/3.12.
 - Demo GIF generator (`scripts/render_demo_gif.py`).
 
-[Unreleased]: https://github.com/AaronGrillot98/mithril/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/AaronGrillot98/mithril/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/AaronGrillot98/mithril/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/AaronGrillot98/mithril/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/AaronGrillot98/mithril/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/AaronGrillot98/mithril/compare/v0.3.0...v0.3.1

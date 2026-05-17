@@ -160,15 +160,29 @@ class DetectionPipeline:
         await self.judge.aclose()
 
 
-def default_pipeline(threshold: float = 0.7, *, judge: Judge | None = None) -> DetectionPipeline:
+def default_pipeline(
+    threshold: float = 0.7,
+    *,
+    judge: Judge | None = None,
+    extra_detectors: list[Detector] | None = None,
+) -> DetectionPipeline:
+    """Build the canonical Mithril detection pipeline.
+
+    `extra_detectors` lets callers append additional detectors — the v0.5
+    embedding-similarity detector hooks in this way when enabled, since
+    pulling in sentence-transformers at module load would be expensive.
+    """
+    base: list[Detector] = [
+        JailbreakDetector(),
+        RoleHijackDetector(),
+        SystemPromptLeakDetector(),
+        PIIDetector(),
+        SecretsDetector(),
+    ]
+    if extra_detectors:
+        base.extend(extra_detectors)
     return DetectionPipeline(
-        detectors=[
-            JailbreakDetector(),
-            RoleHijackDetector(),
-            SystemPromptLeakDetector(),
-            PIIDetector(),
-            SecretsDetector(),
-        ],
+        detectors=base,
         threshold=threshold,
         judge=judge,
     )

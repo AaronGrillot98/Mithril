@@ -1,6 +1,6 @@
 [project]
 name = "mithril-llm"
-version = "0.4.0"
+version = "0.5.0"
 description = "A firewall for LLMs — block prompt injection, jailbreaks, and PII exfiltration in real time."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -52,12 +52,18 @@ dev = [
     "langchain-core>=0.2",
     "litellm>=1.40",
 ]
-langchain = ["langchain-core>=0.2"]
-litellm   = ["litellm>=1.40"]
-fastapi   = []  # FastAPI is already a core dependency; this extra exists for documentation parity.
+langchain  = ["langchain-core>=0.2"]
+litellm    = ["litellm>=1.40"]
+fastapi    = []  # FastAPI is already a core dependency; this extra exists for documentation parity.
+embeddings = [
+    "sentence-transformers>=2.5",
+    "numpy>=1.24",
+]
 all       = [
     "langchain-core>=0.2",
     "litellm>=1.40",
+    "sentence-transformers>=2.5",
+    "numpy>=1.24",
 ]
 
 [project.scripts]
@@ -76,6 +82,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["mithril*"]
+
+[tool.setuptools.package-data]
+"mithril.embeddings" = ["corpus.jsonl"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

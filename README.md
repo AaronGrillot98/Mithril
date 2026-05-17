@@ -228,6 +228,44 @@ MITHRIL_JUDGE_MODEL=llama3.2:3b
 MITHRIL_JUDGE_API_KEY=
 ```
 
+## Embedding similarity (v0.5)
+
+A third defense layer alongside the regex pipeline and LLM judge. Catches prompts that don't trip any regex but are semantically very close to a canonical jailbreak (DAN variants worded differently, paraphrased instruction overrides, etc.).
+
+Off by default. Requires the optional `[embeddings]` extra (which pulls in `sentence-transformers`):
+
+```bash
+pip install "mithril-llm[embeddings]"
+```
+
+```bash
+MITHRIL_EMBEDDING_ENABLED=true
+MITHRIL_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+MITHRIL_EMBEDDING_THRESHOLD=0.80
+```
+
+How it works: the detector loads a bundled corpus of ~50 canonical jailbreak prompts (DAN, AIM, STAN, Developer Mode, instruction overrides, role hijacks, grandma exploits, etc.), encodes them once at startup with `sentence-transformers/all-MiniLM-L6-v2` (~90 MB), then for each incoming prompt computes cosine similarity to the closest corpus entry. Matches above threshold produce a `Finding` with confidence scaled linearly from `confidence_floor` (default 0.7) at the threshold up to 1.0 at perfect similarity. Sits as a regular detector in the pipeline — its confidence contributes to the same `max(confidence)` aggregation as the regex rules.
+
+The bundled corpus is at [`mithril/embeddings/corpus.jsonl`](mithril/embeddings/corpus.jsonl) — fork it, add your own, or point at a different file via `MITHRIL_EMBEDDING_CORPUS_PATH`.
+
+## Streaming output scan (v0.5)
+
+When output scanning is enabled, streaming requests are now scanned **incrementally** rather than buffer-then-scan. Chunks are forwarded to the client as they arrive — no streaming-UX regression — while a background accumulator runs the scanner after each chunk.
+
+| Mode     | Streaming behavior in v0.5                                          |
+| -------- | ------------------------------------------------------------------- |
+| `block`  | Incremental. Forward chunks until a finding fires, then emit a final SSE error event + `[DONE]` and close. |
+| `log`    | Incremental. Forward chunks unchanged; record findings to the event log. |
+| `redact` | Still buffer-then-scan (true incremental redaction needs a trail-buffer algorithm — v0.6). |
+
+The upstream's `[DONE]` is stripped on the way out and replaced with a single terminator we control — without that, real OpenAI-SSE clients stop reading at the first `[DONE]` and miss any error events we inject.
+
+Switch back to v0.4 buffered behavior if you need redact-on-stream today:
+
+```bash
+MITHRIL_OUTPUT_SCAN_STREAM_MODE=buffer
+```
+
 ## Output scanning (v0.4)
 
 Mithril scans the LLM's *response* before forwarding it back to the client — catches PII, API keys, and private keys the model was tricked or instructed into echoing.
@@ -383,8 +421,8 @@ Works out of the box with any OpenAI-compatible API — OpenAI, Anthropic (via s
 - [x] **v0.3** — LangChain / LiteLLM / FastAPI integrations.
 - [x] **v0.3.1 + v0.3.2** — Hardening pass: 6 real bugs fixed, coverage 58% → 88%.
 - [x] **v0.4** — Output scanning (block / redact / log).
-- [ ] **v0.5** — Incremental output scanning for streaming responses; embedding-based similarity to known jailbreak corpora (GCG, AdvSuffix).
-- [ ] **v0.6** — Per-route policies (different thresholds for different endpoints).
+- [x] **v0.5** — Incremental streaming output scan + embedding-similarity layer.
+- [ ] **v0.6** — Trail-buffer redaction for streaming responses; per-route policies; embedding-based detection of GCG-style adversarial suffixes.
 - [ ] **v1.0** — Published precision/recall against [Garak] as well.
 
 [JailbreakBench]: https://jailbreakbench.github.io/

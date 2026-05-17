@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     # Cap request body size to prevent DoS via giant prompts. Default 1 MiB.
     max_body_bytes: int = Field(default=1_048_576, ge=1024)
 
+    # Cap upstream response size when output scanning is enabled. Buffer-and-scan
+    # would otherwise be unbounded — a malicious or buggy upstream can OOM the
+    # proxy. Default 4 MiB (large enough for the longest reasonable completion).
+    max_response_bytes: int = Field(default=4_194_304, ge=1024)
+
     # --- LLM judge (v0.2) ----------------------------------------------------
     # The judge is an optional second-opinion model that runs on requests
     # falling into the "ambiguous zone" — neither clearly safe nor clearly
@@ -58,6 +63,44 @@ class Settings(BaseSettings):
     output_scan_mode: Literal["block", "redact", "log"] = "redact"
     output_scan_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
     output_scan_marker: str = "[REDACTED:{rule_id}]"
+
+    # --- Embedding similarity layer (v0.5) -----------------------------------
+    # Third defense layer: catches prompts semantically similar to known
+    # jailbreaks even when no regex rule fires. Off by default — requires
+    # the optional [embeddings] extra (`pip install mithril-llm[embeddings]`)
+    # which pulls sentence-transformers (~500 MB with torch).
+    embedding_enabled: bool = False
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_threshold: float = Field(default=0.80, ge=0.0, le=1.0)
+    embedding_corpus_path: str = ""  # empty = use bundled corpus
+
+    # How streaming responses are scanned when output_scan_enabled is true.
+    #   incremental — forward chunks as they arrive; scan after each. Block
+    #                 mode emits a final error event and closes. Log mode
+    #                 records findings without altering the stream. (Redact
+    #                 mode falls back to `buffer` because true streaming
+    #                 redaction needs a trail-buffer algorithm — v0.6.)
+    #   buffer      — collect the whole SSE stream, scan as a whole, re-emit.
+    #                 The v0.4 default. Breaks streaming UX but supports
+    #                 redaction.
+    output_scan_stream_mode: Literal["incremental", "buffer"] = "incremental"
+
+    @model_validator(mode="after")
+    def _validate_output_scan_marker(self) -> "Settings":
+        """The marker is a Python format string. Fail fast at startup if it has
+        a malformed placeholder, so a misconfiguration doesn't crash a live
+        proxy on the first response that needs redaction."""
+        try:
+            self.output_scan_marker.format(
+                rule_id="TEST", detector="test", severity="info"
+            )
+        except (IndexError, KeyError, ValueError) as exc:
+            raise ValueError(
+                f"MITHRIL_OUTPUT_SCAN_MARKER is not a valid format string "
+                f"({type(exc).__name__}: {exc}). Allowed placeholders: "
+                f"{{rule_id}}, {{detector}}, {{severity}}."
+            ) from exc
+        return self
 
     @model_validator(mode="after")
     def _validate_judge_zone(self) -> "Settings":

@@ -248,6 +248,85 @@ def test_server_passes_clean_response_unchanged(server_client):
     assert r.json()["choices"][0]["message"]["content"] == "Paris is the capital of France."
 
 
+def test_server_rejects_oversized_non_streaming_response(tmp_path, monkeypatch):
+    """When upstream returns more than MITHRIL_MAX_RESPONSE_BYTES, scanning is
+    refused with a 502 — protects the proxy from OOM via runaway responses."""
+    monkeypatch.setenv("MITHRIL_DB_PATH", str(tmp_path / "m.db"))
+    monkeypatch.setenv("MITHRIL_OUTPUT_SCAN_ENABLED", "true")
+    monkeypatch.setenv("MITHRIL_OUTPUT_SCAN_MODE", "redact")
+    monkeypatch.setenv("MITHRIL_MAX_RESPONSE_BYTES", "1024")  # 1 KiB cap
+
+    from mithril import config as _config
+    from mithril.config import Settings
+
+    fresh = Settings()
+    monkeypatch.setattr(_config, "settings", fresh)
+    from mithril import server as _server
+
+    monkeypatch.setattr(_server, "settings", fresh)
+
+    huge = "x" * 5000  # response will be ~5 KiB, exceeds the 1 KiB cap
+
+    def responder(request):
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "content": huge}}]},
+        )
+
+    with TestClient(_server.app) as client:
+        _stub_upstream(client, responder)
+        r = client.post(
+            "/v1/chat/completions",
+            json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer sk-fake"},
+        )
+    assert r.status_code == 502
+    assert r.json()["error"]["type"] == "response_too_large"
+
+
+def test_server_rejects_oversized_streaming_response(tmp_path, monkeypatch):
+    """Same protection for the streaming buffer-then-scan path."""
+    monkeypatch.setenv("MITHRIL_DB_PATH", str(tmp_path / "m.db"))
+    monkeypatch.setenv("MITHRIL_OUTPUT_SCAN_ENABLED", "true")
+    monkeypatch.setenv("MITHRIL_MAX_RESPONSE_BYTES", "1024")
+
+    from mithril import config as _config
+    from mithril.config import Settings
+
+    fresh = Settings()
+    monkeypatch.setattr(_config, "settings", fresh)
+    from mithril import server as _server
+
+    monkeypatch.setattr(_server, "settings", fresh)
+
+    # Build an SSE stream that's well over the cap.
+    big_payload = "x" * 300
+    payloads = [{"choices": [{"delta": {"content": big_payload}}]} for _ in range(20)]
+    sse = b"".join(f"data: {json.dumps(p)}\n\n".encode("utf-8") for p in payloads)
+    sse += b"data: [DONE]\n\n"
+
+    def responder(request):
+        return httpx.Response(
+            200,
+            content=sse,
+            headers={"content-type": "text/event-stream"},
+        )
+
+    with TestClient(_server.app) as client:
+        _stub_upstream(client, responder)
+        r = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": True,
+            },
+            headers={"Authorization": "Bearer sk-fake"},
+        )
+    assert r.status_code == 502
+    assert r.json()["error"]["type"] == "response_too_large"
+
+
 def test_server_does_not_scan_non_200_upstream(server_client):
     """If upstream errors, we should pass that through, not run the scanner on it."""
     def responder(request):
