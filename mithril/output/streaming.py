@@ -14,9 +14,13 @@ This module preserves streaming UX in two of the three output modes:
                  Doing this incrementally requires a trail-buffer
                  algorithm that is on the v0.6 roadmap.
 
-The SSE parsing is line-based and tolerant of chunk boundaries that
-land in the middle of a record — we keep a residual buffer of any
-incomplete trailing line and prepend it to the next chunk.
+SSE byte handling: we maintain a byte-level emit-residual buffer separate
+from the text-level content parser. Only **complete** SSE lines (ending
+in ``\\n``) are forwarded to the client — any trailing partial bytes are
+held back until the next chunk arrives. This guarantees that a ``data:
+[DONE]`` line split across TCP packets is still detected and stripped
+before it reaches the client (otherwise the client would stop reading
+before our injected block event).
 """
 
 from __future__ import annotations
@@ -43,10 +47,11 @@ _OUR_DONE = b"data: [DONE]\n\n"
 class _ParseState:
     """Mutable state carried across `process` calls for one stream."""
 
-    residual: str = ""            # incomplete trailing SSE line
-    accumulated: str = ""         # all delta.content seen so far
-    blocked: bool = False         # latched once we've decided to block
-    last_scan_len: int = 0        # accumulated length at last scan (cheap rate limit)
+    text_residual: str = ""        # incomplete trailing SSE line for content parser
+    emit_residual: bytes = b""     # bytes held back from emit until line is complete
+    accumulated: str = ""          # all delta.content seen so far
+    blocked: bool = False          # latched once we've decided to block
+    last_scan_len: int = 0         # accumulated length at last scan (cheap rate limit)
 
 
 def _block_event_no_done(result: OutputScanResult) -> bytes:
@@ -62,6 +67,18 @@ def _block_event_no_done(result: OutputScanResult) -> bytes:
             "score": result.score,
             "severity": result.top_severity,
             "findings": [f.model_dump() for f in result.findings],
+        }
+    }
+    return f"data: {json.dumps(error)}\n\n".encode("utf-8")
+
+
+def truncation_event(reason: str) -> bytes:
+    """An SSE error chunk emitted when the stream was cut for a non-scan reason
+    (e.g. the upstream response exceeded ``MITHRIL_MAX_RESPONSE_BYTES``)."""
+    error = {
+        "error": {
+            "type": "response_too_large",
+            "message": reason,
         }
     }
     return f"data: {json.dumps(error)}\n\n".encode("utf-8")
@@ -115,22 +132,48 @@ class IncrementalStreamScanner:
     _state: _ParseState = field(default_factory=_ParseState)
     last_result: OutputScanResult | None = None
 
+    @property
+    def is_blocked(self) -> bool:
+        """Whether process_chunks has decided to block this stream."""
+        return self._state.blocked
+
+    @property
+    def accumulated(self) -> str:
+        """Accumulated text content seen so far across all chunks."""
+        return self._state.accumulated
+
     def _scan_if_due(self) -> OutputScanResult | None:
         """Run a scan if enough new content has accumulated since the last scan."""
         if len(self._state.accumulated) - self._state.last_scan_len < self.scan_interval_chars:
             return None
         self._state.last_scan_len = len(self._state.accumulated)
-        result = self.scanner.scan(self._state.accumulated)
+        result = self._safe_scan(self._state.accumulated)
         self.last_result = result
         return result
 
-    def _absorb_chunk(self, raw: bytes) -> None:
-        """Append a raw SSE chunk to internal state, advancing the
-        delta.content accumulator. No bytes are emitted from here."""
-        text = self._state.residual + raw.decode("utf-8", errors="replace")
+    def _safe_scan(self, text: str) -> OutputScanResult:
+        """Run the configured scanner, never letting an exception break the stream.
+
+        On scanner failure we log and return an "allow" result so the stream
+        continues unaltered — failing closed would convert a transient detector
+        bug into a user-visible outage. The exception is recorded so operators
+        can spot it in logs.
+        """
+        try:
+            return self.scanner.scan(text)
+        except Exception as exc:  # noqa: BLE001 — we genuinely want to swallow any
+            logger.exception("Output scanner raised; failing open: %s", exc)
+            return OutputScanResult(action="allow", score=0.0)
+
+    def _absorb_text(self, complete_bytes: bytes) -> None:
+        """Append complete-line bytes to internal state, advancing the
+        delta.content accumulator. ``complete_bytes`` MUST end at a line
+        boundary — partial trailing lines should be held back by the caller."""
+        text = self._state.text_residual + complete_bytes.decode("utf-8", errors="replace")
         lines = text.split("\n")
-        # The last element might be a partial line — keep it as residual.
-        self._state.residual = lines.pop()
+        # If complete_bytes ended in \n, lines[-1] is "" (no residual).
+        # Otherwise we accidentally received a partial line — keep residual.
+        self._state.text_residual = lines.pop()
 
         for line in lines:
             content = _extract_content_delta(line)
@@ -153,17 +196,31 @@ class IncrementalStreamScanner:
         we emit a single ``[DONE]`` of our own at the end so any block /
         error event we inject is guaranteed to reach OpenAI-SSE clients
         (which stop reading at the first ``[DONE]``).
+
+        Only complete SSE lines are forwarded; trailing partial bytes are
+        held in ``_state.emit_residual`` until they're complete. This
+        prevents a TCP-sliced ``[DONE]`` from leaking through.
         """
         async for raw in source:
             if self._state.blocked:
                 # Already decided to block — swallow any further upstream bytes.
                 continue
 
-            self._absorb_chunk(raw)
+            combined = self._state.emit_residual + raw
+            last_nl = combined.rfind(b"\n")
+            if last_nl < 0:
+                # No newline anywhere — entire combined buffer is partial.
+                self._state.emit_residual = combined
+                continue
 
-            # Strip the upstream [DONE] terminator before forwarding. We'll
-            # emit our own terminator at the very end of the stream.
-            yield _DONE_LINE.sub(b"", raw)
+            complete = combined[: last_nl + 1]
+            self._state.emit_residual = combined[last_nl + 1 :]
+
+            self._absorb_text(complete)
+            # Strip [DONE] from the emittable bytes; emit only complete lines.
+            emittable = _DONE_LINE.sub(b"", complete)
+            if emittable:
+                yield emittable
 
             result = self._scan_if_due()
             if result is None:
@@ -175,16 +232,26 @@ class IncrementalStreamScanner:
                 yield _OUR_DONE
                 return  # don't iterate further
 
-        # Source exhausted. Run a final scan to catch content that was below
-        # the throttle threshold at the very end — without this, short
-        # responses where the last interesting chars are <scan_interval_chars
-        # away from the end of the stream would slip through.
-        if not self._state.blocked and self._state.accumulated:
-            final = self.scanner.scan(self._state.accumulated)
-            self.last_result = final
-            if self.mode == "block" and final.action == "block":
-                self._state.blocked = True
-                yield _block_event_no_done(final)
+        # Source exhausted. Flush whatever's left in emit_residual (after
+        # absorbing it into the content accumulator + stripping any DONE).
+        if not self._state.blocked:
+            if self._state.emit_residual:
+                self._absorb_text(self._state.emit_residual)
+                emittable = _DONE_LINE.sub(b"", self._state.emit_residual)
+                if emittable:
+                    yield emittable
+                self._state.emit_residual = b""
+
+            # Run a final scan to catch content that was below the throttle
+            # threshold at the very end — without this, short responses where
+            # the last interesting chars are <scan_interval_chars away from
+            # the end of the stream would slip through.
+            if self._state.accumulated:
+                final = self._safe_scan(self._state.accumulated)
+                self.last_result = final
+                if self.mode == "block" and final.action == "block":
+                    self._state.blocked = True
+                    yield _block_event_no_done(final)
 
         yield _OUR_DONE
 
@@ -194,6 +261,6 @@ class IncrementalStreamScanner:
         scan interval) still get analyzed."""
         if self._state.blocked:
             return self.last_result
-        result = self.scanner.scan(self._state.accumulated)
+        result = self._safe_scan(self._state.accumulated)
         self.last_result = result
         return result

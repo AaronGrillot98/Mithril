@@ -25,6 +25,7 @@ from mithril.models import (
     OutputScanResult,
 )
 from mithril.output import IncrementalStreamScanner, default_output_scanner
+from mithril.output.streaming import truncation_event as _streaming_truncation_event
 from mithril.proxy import UpstreamClient
 from mithril.storage import EventStore
 
@@ -71,6 +72,8 @@ _FORWARD_RESPONSE_HEADERS = frozenset({
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+
     judge = build_judge(settings)
 
     extra_detectors: list[Any] = []
@@ -104,6 +107,18 @@ async def lifespan(app: FastAPI):
         judge=judge,
         extra_detectors=extra_detectors,
     )
+
+    # Warm up any detectors with expensive one-time setup (e.g. the embedding
+    # layer's model load) BEFORE the proxy starts accepting requests. Without
+    # this, the first incoming request would pay the 1–2s model-load cost
+    # synchronously, blocking the asyncio loop.
+    for det in app.state.pipeline.detectors:
+        warmup = getattr(det, "warmup", None)
+        if callable(warmup):
+            try:
+                await asyncio.to_thread(warmup)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Detector %s warmup failed: %s", det.name, exc)
     app.state.pipeline.judge_low = settings.judge_low_threshold
     app.state.pipeline.judge_high = settings.judge_high_threshold
     app.state.pipeline.fail_mode = settings.judge_fail_mode
@@ -504,10 +519,15 @@ async def _incremental_stream_with_scan(
     """
     incremental = IncrementalStreamScanner(scanner=scanner, mode=scanner.mode)
 
+    # Tracked by source(); read by relay() to decide whether to append a
+    # truncation error frame after the source iterator exits.
+    truncated_state = {"hit": False}
+
     async def source() -> Any:
         # Bound the total stream size to prevent OOM, same as the buffered
-        # path. We track total bytes seen and bail with an empty stream if
-        # exceeded; the client gets a clean truncation.
+        # path. When exceeded we stop yielding chunks and set the flag so
+        # relay() can append a structured error frame — without that the
+        # client just sees an abrupt cut with no explanation.
         total = 0
         try:
             async for chunk in upstream_resp.aiter_raw():
@@ -517,6 +537,7 @@ async def _incremental_stream_with_scan(
                         "upstream stream exceeded max_response_bytes (> %d); aborting",
                         settings.max_response_bytes,
                     )
+                    truncated_state["hit"] = True
                     return
                 yield chunk
         except httpx.StreamConsumed:
@@ -524,25 +545,43 @@ async def _incremental_stream_with_scan(
             content = upstream_resp.content
             if len(content) <= settings.max_response_bytes:
                 yield content
+            else:
+                logger.warning(
+                    "upstream pre-buffered response exceeded max_response_bytes "
+                    "(%d > %d); aborting",
+                    len(content),
+                    settings.max_response_bytes,
+                )
+                truncated_state["hit"] = True
 
     async def relay() -> Any:
         try:
             async for emitted in incremental.process_chunks(source()):
                 yield emitted
+            # If we stopped iterating because the upstream blew past the
+            # size cap, surface a structured error frame to the client
+            # — equivalent to the 502 the non-streaming path returns.
+            if truncated_state["hit"]:
+                yield _streaming_truncation_event(
+                    f"Upstream stream exceeded {settings.max_response_bytes} bytes "
+                    "while output scanning was enabled. Raise "
+                    "MITHRIL_MAX_RESPONSE_BYTES or disable output scanning if this "
+                    "was intentional."
+                )
         finally:
             # After the stream ends, run a final scan so log-mode catches
             # whatever was below the scan-interval threshold at the very end.
             result = await incremental.finalize()
             if store is not None and result is not None and result.findings:
                 await store.arecord(
-                    action="log" if not incremental._state.blocked else "block",
+                    action="log" if not incremental.is_blocked else "block",
                     model=model,
                     result=DetectionResult(
-                        blocked=incremental._state.blocked,
+                        blocked=incremental.is_blocked,
                         score=result.score,
                         findings=result.findings,
                     ),
-                    snippet=f"[output stream] {incremental._state.accumulated[:120]}",
+                    snippet=f"[output stream] {incremental.accumulated[:120]}",
                 )
             await upstream_resp.aclose()
 

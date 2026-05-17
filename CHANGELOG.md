@@ -6,6 +6,74 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-05-16
+
+Third hardening pass — full audit of the v0.5 code surface. Five real bugs
+fixed and three defensive improvements landed. No new features.
+
+### Fixed
+- **`[DONE]` split across chunk boundaries** in incremental streaming
+  output scan. The previous regex-strip ran per-chunk, so if TCP slicing
+  put `data: [D` in one chunk and `ONE]\n\n` in the next, neither
+  matched and the upstream terminator slipped through — real OpenAI-SSE
+  clients would stop reading at the first `[DONE]` and miss our injected
+  block / error events. Now uses a byte-level emit-residual: only
+  complete SSE lines (ending in `\n`) are forwarded; trailing partial
+  bytes are held back until they complete. Exercised by a byte-by-byte
+  split test that verifies every possible TCP slice point produces
+  exactly one `[DONE]` in the forwarded stream.
+- **Embedding model is now pre-warmed at startup.** Lifespan calls
+  `Detector.warmup()` on every detector (wrapped in `asyncio.to_thread`
+  so it doesn't block the loop) before the proxy accepts requests.
+  Without this, the first request after a fresh boot paid the ~1–2 s
+  cost of loading `sentence-transformers` synchronously on the request
+  thread.
+- **Streaming oversize errors are now surfaced.** When the upstream
+  stream exceeds `MITHRIL_MAX_RESPONSE_BYTES` the proxy now emits a
+  structured `response_too_large` SSE error chunk before closing —
+  matches the 502 response the non-streaming path returns. Previously
+  the client just saw an abrupt cut with no explanation.
+- **Scanner exceptions no longer break the stream.** All `scanner.scan()`
+  calls inside `IncrementalStreamScanner` are now wrapped — a buggy
+  detector logs the exception and the scan fails open. Without this,
+  a single bad detector would convert into a user-visible response
+  truncation.
+- **Corpus loader tolerates malformed lines.** Invalid JSON or
+  missing-required-field rows now log a warning and skip rather than
+  crashing the whole load (which would take the embedding layer down
+  at startup).
+
+### Added
+- **`Detector.warmup()`** base hook — default no-op; the embedding
+  detector overrides to load the model + encode the corpus eagerly.
+  The proxy lifespan invokes it for every detector at startup.
+- **`IncrementalStreamScanner.is_blocked`** / **`.accumulated`** public
+  properties replacing direct access to `_state.*`. Internal callers in
+  the server module switched to the public API.
+- **9 new tests** covering: `[DONE]` cross-chunk handling (single split +
+  exhaustive byte-by-byte), scanner-exception robustness, corpus loader
+  tolerance, warmup behavior with and without the optional dep,
+  empty-string corpus path falling back to default.
+
+### Changed
+- `EmbeddingSimilarityDetector.__init__` accepts `corpus_path=""` (the
+  shape pydantic-settings produces for unset fields) as equivalent to
+  `None` → use the bundled default corpus.
+- Embedding test fixtures now use the `tmp_path` pytest fixture instead
+  of writing to `tests/_emb_*.jsonl` — fixes a parallel-test-execution
+  race.
+
+### Known limitations (deferred to v0.6)
+- The embedding detector's `scan()` is sync; in an async server it
+  blocks the loop for the ~5–30 ms of inference. A proper
+  `async ascan()` API + executor wiring lands in v0.6.
+
+### Validation
+- **198 tests** (was 191, +7 new)
+- ruff clean
+- internal benchmark: 100/100 (unchanged)
+- JailbreakBench wrapped: 100/100 recall + precision (unchanged)
+
 ## [0.5.0] — 2026-05-16
 
 Two new defense capabilities. The proxy can now run a third detection layer
@@ -273,7 +341,8 @@ QA hardening pass. Six real bugs fixed, four 0%-coverage files brought to ~90% c
 - GitHub Actions CI: pytest + benchmark + ruff across Ubuntu/Windows × Python 3.10/3.11/3.12.
 - Demo GIF generator (`scripts/render_demo_gif.py`).
 
-[Unreleased]: https://github.com/AaronGrillot98/mithril/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/AaronGrillot98/mithril/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/AaronGrillot98/mithril/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/AaronGrillot98/mithril/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/AaronGrillot98/mithril/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/AaronGrillot98/mithril/compare/v0.3.1...v0.3.2

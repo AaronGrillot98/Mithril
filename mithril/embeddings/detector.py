@@ -36,20 +36,35 @@ class CorpusEntry:
 
 
 def _load_corpus(path: Path) -> list[CorpusEntry]:
+    """Parse a JSONL corpus file, tolerating malformed lines.
+
+    A single bad line (invalid JSON, missing required field) is logged at
+    warning level and skipped — it shouldn't prevent the rest of the
+    corpus from loading or take the embedding layer down at startup.
+    """
     entries: list[CorpusEntry] = []
     with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
+        for lineno, raw in enumerate(f, start=1):
+            line = raw.strip()
             if not line or line.startswith("#"):
                 continue
-            obj = json.loads(line)
-            entries.append(
-                CorpusEntry(
-                    name=str(obj["name"]),
-                    text=str(obj["text"]),
-                    category=str(obj.get("category", "jailbreak")),
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError as exc:
+                logger.warning("corpus %s:%d: invalid JSON (%s) — skipping", path, lineno, exc)
+                continue
+            try:
+                entries.append(
+                    CorpusEntry(
+                        name=str(obj["name"]),
+                        text=str(obj["text"]),
+                        category=str(obj.get("category", "jailbreak")),
+                    )
                 )
-            )
+            except (KeyError, TypeError) as exc:
+                logger.warning(
+                    "corpus %s:%d: missing required field (%s) — skipping", path, lineno, exc
+                )
     return entries
 
 
@@ -85,7 +100,13 @@ class EmbeddingSimilarityDetector(Detector):
         confidence_floor: float = 0.7,
         encoder: _Encoder | None = None,
     ):
-        self.corpus_path = Path(corpus_path) if corpus_path else DEFAULT_CORPUS_PATH
+        # Accept None or empty string as "use default" — pydantic-settings
+        # surfaces unset string fields as "" which is the more common shape
+        # we'll see from MITHRIL_EMBEDDING_CORPUS_PATH.
+        if corpus_path is None or corpus_path == "":
+            self.corpus_path = DEFAULT_CORPUS_PATH
+        else:
+            self.corpus_path = Path(corpus_path)
         self.model_name = model_name
         self.threshold = threshold
         self.confidence_floor = confidence_floor
@@ -98,6 +119,17 @@ class EmbeddingSimilarityDetector(Detector):
         # defer to first call so import time stays cheap.
         if encoder is not None:
             self._ensure_loaded()
+
+    def warmup(self) -> None:
+        """Eagerly load the model and encode the corpus. The server calls
+        this at startup so the first request doesn't pay the ~1–2s cost
+        of importing torch and instantiating the SentenceTransformer."""
+        try:
+            self._ensure_loaded()
+        except ImportError as exc:
+            # Same graceful-degrade behavior as in scan().
+            logger.warning("Embedding detector disabled at warmup: %s", exc)
+            self._encoder = _NullEncoder()
 
     def _ensure_loaded(self) -> None:
         if self._encoder is not None and self._corpus_embeddings is not None:

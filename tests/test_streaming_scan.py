@@ -125,7 +125,7 @@ async def test_handles_chunk_split_mid_sse_line():
     chunks = [full_event[:half], full_event[half:], b"data: [DONE]\n\n"]
     async for _ in inc.process_chunks(_async_iter(chunks)):
         pass
-    assert inc._state.accumulated == "hello world"
+    assert inc.accumulated == "hello world"
 
 
 @pytest.mark.asyncio
@@ -166,10 +166,14 @@ async def test_non_sse_chunks_pass_through_silently():
     forwarded = b""
     async for emitted in inc.process_chunks(_async_iter(chunks)):
         forwarded += emitted
-    # Garbage chunks are forwarded verbatim, plus our own terminator at the end.
-    for c in chunks:
-        assert c in forwarded
-    assert inc._state.accumulated == ""
+    # Garbage chunks are forwarded once the partial-line buffer can flush
+    # them (lines need a \n to be considered complete). With the new
+    # byte-residual logic, content without trailing newlines is held until
+    # the source ends. The accumulated text content remains empty either way.
+    assert inc.accumulated == ""
+    # The original bytes show up somewhere in the forwarded stream.
+    combined = b"".join(chunks)
+    assert combined.split(b"\n")[0] in forwarded
 
 
 # --- server integration tests ----------------------------------------------
@@ -271,6 +275,76 @@ def test_server_incremental_passes_clean_stream(stream_block_client):
     text = r.text
     assert "Paris" in text
     assert "mithril_output_blocked" not in text
+
+
+@pytest.mark.asyncio
+async def test_done_marker_split_across_chunks_is_still_stripped():
+    """Regression test for the v0.5 QA finding: if [DONE] arrives split across
+    TCP packets we still strip it before forwarding to the client. Without
+    this, real OpenAI-SSE clients would stop reading before our injected
+    block event."""
+    scanner = default_output_scanner(mode="block")
+    inc = IncrementalStreamScanner(scanner=scanner, mode="block", scan_interval_chars=1)
+
+    full = b"data: " + json.dumps(_delta("hello")).encode() + b"\n\n"
+    full += b"data: [DONE]\n\n"
+    # Split [DONE] in half across chunks.
+    cut = full.index(b"[DONE]") + 2  # mid-bracket
+    chunks = [full[:cut], full[cut:]]
+
+    forwarded = b""
+    async for emitted in inc.process_chunks(_async_iter(chunks)):
+        forwarded += emitted
+
+    # Exactly one [DONE] in the forwarded output (ours), not two.
+    assert forwarded.count(b"[DONE]") == 1
+
+
+@pytest.mark.asyncio
+async def test_scanner_exception_fails_open_not_breaks_stream():
+    """Regression test: a buggy detector raising mid-stream must NOT take
+    down the response — we log + treat as allow and keep streaming."""
+
+    class _BoomScanner:
+        mode = "block"
+
+        def scan(self, text):
+            raise RuntimeError("boom")
+
+    inc = IncrementalStreamScanner(scanner=_BoomScanner(), mode="block", scan_interval_chars=1)
+    chunks = [
+        f"data: {json.dumps(_delta('Hello '))}\n\n".encode("utf-8"),
+        f"data: {json.dumps(_delta('world.'))}\n\n".encode("utf-8"),
+        b"data: [DONE]\n\n",
+    ]
+    forwarded = b""
+    async for emitted in inc.process_chunks(_async_iter(chunks)):
+        forwarded += emitted
+
+    # No block event, no crash, original content forwarded, our own [DONE].
+    assert b"mithril_output_blocked" not in forwarded
+    assert b"Hello" in forwarded
+    assert forwarded.count(b"[DONE]") == 1
+
+
+@pytest.mark.asyncio
+async def test_done_marker_split_at_every_byte():
+    """Exhaustive: split the SSE bytes at every position and check we
+    always end up with exactly one [DONE] in the forwarded output."""
+    scanner = default_output_scanner(mode="block")
+    full = (
+        b"data: " + json.dumps(_delta("hi")).encode() + b"\n\n"
+        b"data: [DONE]\n\n"
+    )
+    for cut in range(1, len(full)):
+        inc = IncrementalStreamScanner(scanner=scanner, mode="block", scan_interval_chars=1)
+        chunks = [full[:cut], full[cut:]]
+        forwarded = b""
+        async for emitted in inc.process_chunks(_async_iter(chunks)):
+            forwarded += emitted
+        assert forwarded.count(b"[DONE]") == 1, (
+            f"split at byte {cut} produced {forwarded.count(b'[DONE]')} [DONE] markers"
+        )
 
 
 def test_server_redact_mode_falls_back_to_buffered(tmp_path, monkeypatch):
