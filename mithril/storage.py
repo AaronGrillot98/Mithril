@@ -102,6 +102,12 @@ class EventStore:
                 ),
             )
             conn.commit()
+        try:
+            from mithril.metrics import EVENT_LOG_WRITES
+
+            EVENT_LOG_WRITES.inc()
+        except Exception:  # nosec B110 — metrics must never break the write path  # noqa: BLE001
+            pass
 
     def recent(self, limit: int = 100) -> list[dict[str, Any]]:
         with self._connect() as conn:

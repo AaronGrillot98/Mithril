@@ -120,6 +120,8 @@ cp .env.example .env
 
 ## Quickstart
 
+> **Deploying to production?** See [`docs/deployment.md`](docs/deployment.md) for the Docker / Helm / systemd walkthrough, hardening checklist, and observability setup.
+
 ```python
 from openai import OpenAI
 
@@ -410,8 +412,31 @@ All settings via env vars or `.env`. Full list in [`.env.example`](.env.example)
 | `MITHRIL_JUDGE_ENABLED`           | `false`                     | LLM-judge fallback master switch.    |
 | `MITHRIL_OUTPUT_SCAN_ENABLED`     | `false`                     | Response scanning master switch.     |
 | `MITHRIL_OUTPUT_SCAN_MODE`        | `redact`                    | `block` / `redact` / `log`.          |
+| `MITHRIL_METRICS_ENABLED`         | `true`                      | Expose Prometheus metrics on `/metrics`. |
 
 Works out of the box with any OpenAI-compatible API — OpenAI, Anthropic (via shim), Ollama, Together, Groq, vLLM, llama.cpp, LM Studio.
+
+### Metrics
+
+When `MITHRIL_METRICS_ENABLED=true` (the default), Mithril exposes a `/metrics` endpoint in the Prometheus text format. Alongside the standard HTTP server metrics (request count, latency histogram, in-flight requests) it surfaces these Mithril-specific series:
+
+| Metric                              | Type      | Labels                              |
+| ----------------------------------- | --------- | ----------------------------------- |
+| `mithril_blocked_total`             | counter   | `severity`, `rule_id`, `detector`   |
+| `mithril_allowed_total`             | counter   | —                                   |
+| `mithril_scan_duration_seconds`     | histogram | —                                   |
+| `mithril_judge_calls_total`         | counter   | `verdict`                           |
+| `mithril_output_blocked_total`     | counter   | `mode`, `severity`                  |
+| `mithril_event_log_writes_total`   | counter   | —                                   |
+
+Scrape config:
+
+```yaml
+- job_name: mithril
+  metrics_path: /metrics
+  static_configs:
+    - targets: ['mithril:8080']
+```
 
 ## Roadmap
 

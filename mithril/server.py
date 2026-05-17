@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 
 from mithril import __version__
+from mithril import metrics as _metrics
 from mithril.config import settings
 from mithril.detectors import default_pipeline
 from mithril.judges import build_judge
@@ -147,6 +148,22 @@ app = FastAPI(
 )
 app.add_middleware(RequestIDMiddleware)
 
+if settings.metrics_enabled:
+    try:
+        from prometheus_fastapi_instrumentator import Instrumentator
+
+        Instrumentator(
+            should_group_status_codes=True,
+            should_ignore_untemplated=True,
+            excluded_handlers=["/metrics", "/health"],
+        ).instrument(app).expose(
+            app, include_in_schema=False, endpoint="/metrics"
+        )
+    except ImportError:
+        logger.warning(
+            "prometheus-fastapi-instrumentator not installed; /metrics disabled."
+        )
+
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
@@ -259,7 +276,10 @@ async def chat_completions(request: Request) -> Any:
         raise HTTPException(400, "Invalid chat completions request.") from exc
 
     texts = [m.text() for m in parsed.messages]
+    _t0 = time.perf_counter()
     result: DetectionResult = await app.state.pipeline.evaluate_messages(texts)
+    _metrics.SCAN_DURATION.observe(time.perf_counter() - _t0)
+    _metrics.record_input_result(result)
     snippet = " | ".join(t[:120] for t in texts if t)
 
     if result.blocked and settings.mode == "block":
@@ -340,16 +360,16 @@ async def _proxy_blocking(
             content={"error": {"type": "upstream_unreachable", "message": str(exc)}},
         )
 
-    content_bytes = upstream_resp.content
+    body_bytes: bytes | Response = upstream_resp.content
     if output_scanner is not None and upstream_resp.status_code == 200:
-        content_bytes = await _apply_output_scan_blocking(
-            content_bytes, output_scanner, store, model
+        body_bytes = await _apply_output_scan_blocking(
+            upstream_resp.content, output_scanner, store, model
         )
-        if isinstance(content_bytes, Response):
-            return content_bytes
+        if isinstance(body_bytes, Response):
+            return body_bytes
 
     return Response(
-        content=content_bytes,
+        content=body_bytes,
         status_code=upstream_resp.status_code,
         headers=_filter_response_headers(upstream_resp.headers),
         media_type=upstream_resp.headers.get("content-type"),

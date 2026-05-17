@@ -1,0 +1,19 @@
+apiVersion: v2
+name: mithril
+description: A firewall for LLMs — defends against prompt injection and data exfiltration.
+type: application
+version: 0.1.0
+appVersion: "0.6.0"
+home: https://github.com/AaronGrillot98/mithril
+sources:
+  - https://github.com/AaronGrillot98/mithril
+icon: https://raw.githubusercontent.com/AaronGrillot98/mithril/main/docs/logo.png
+keywords:
+  - llm
+  - security
+  - firewall
+  - prompt-injection
+  - jailbreak-defense
+maintainers:
+  - name: AaronGrillot98
+    url: https://github.com/AaronGrillot98

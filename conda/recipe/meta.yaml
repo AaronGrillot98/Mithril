@@ -1,0 +1,64 @@
+{% set name = "mithril-llm" %}
+{% set version = "0.6.0" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  url: https://pypi.io/packages/source/m/{{ name }}/{{ name }}-{{ version }}.tar.gz
+  sha256: REPLACE_WITH_SHA256_AFTER_PYPI_PUBLISH
+
+build:
+  number: 0
+  noarch: python
+  script: {{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
+  entry_points:
+    - mithril = mithril.cli:app
+
+requirements:
+  host:
+    - python >=3.10
+    - pip
+    - setuptools >=68
+    - wheel
+  run:
+    - python >=3.10
+    - fastapi >=0.110
+    - uvicorn-standard >=0.27
+    - httpx >=0.27
+    - pydantic >=2.6
+    - pydantic-settings >=2.2
+    - typer >=0.12
+    - rich >=13.7
+    - jinja2 >=3.1
+    - prometheus-fastapi-instrumentator >=7.0
+
+test:
+  imports:
+    - mithril
+    - mithril.detectors
+    - mithril.judges
+    - mithril.output
+  commands:
+    - mithril version
+    - mithril --help
+
+about:
+  home: https://github.com/AaronGrillot98/mithril
+  license: Apache-2.0
+  license_family: APACHE
+  license_file: LICENSE
+  summary: A firewall for LLMs — defends against prompt injection and data exfiltration.
+  description: |
+    Mithril is a self-hosted, OpenAI-compatible reverse proxy that sits
+    between an application and any LLM provider. It scans incoming user
+    prompts for attack technique and outgoing model responses for PII /
+    secret leakage. Three install paths (pip, Docker, shell installer)
+    and integrations for LangChain, LiteLLM, and FastAPI.
+  doc_url: https://github.com/AaronGrillot98/mithril#readme
+  dev_url: https://github.com/AaronGrillot98/mithril
+
+extra:
+  recipe-maintainers:
+    - AaronGrillot98

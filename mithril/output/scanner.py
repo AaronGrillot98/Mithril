@@ -13,6 +13,26 @@ from mithril.output.redactor import redact
 OutputMode = Literal["block", "redact", "log"]
 
 
+def _record_metrics(result: OutputScanResult) -> None:
+    try:
+        from mithril.metrics import record_output_action
+
+        record_output_action(result.action, result)
+    except Exception:  # nosec B110 — metrics must never break the scan path  # noqa: BLE001
+        pass
+
+
+def _record_metrics_log(result: OutputScanResult) -> None:
+    try:
+        from mithril.metrics import record_output_action
+
+        # In log mode the action is "allow" but the scanner still found
+        # something; surface it under a synthetic "log" mode label.
+        record_output_action("log", result)
+    except Exception:  # nosec B110 — metrics must never break the scan path  # noqa: BLE001
+        pass
+
+
 class OutputScanner:
     """Scan an LLM response for PII / secrets / credentials.
 
@@ -54,20 +74,26 @@ class OutputScanner:
             return OutputScanResult(action="allow", score=score, findings=findings)
 
         if self.mode == "block":
-            return OutputScanResult(action="block", score=score, findings=findings)
+            result = OutputScanResult(action="block", score=score, findings=findings)
+            _record_metrics(result)
+            return result
 
         if self.mode == "log":
             # Pass through unchanged, but the caller will record the event.
-            return OutputScanResult(action="allow", score=score, findings=findings)
+            result = OutputScanResult(action="allow", score=score, findings=findings)
+            _record_metrics_log(result)
+            return result
 
         # redact mode (default)
         redacted = redact(text, findings, marker_format=self.marker_format)
-        return OutputScanResult(
+        result = OutputScanResult(
             action="redact",
             score=score,
             findings=findings,
             redacted_text=redacted,
         )
+        _record_metrics(result)
+        return result
 
 
 def default_output_scanner(

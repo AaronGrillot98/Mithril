@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -45,6 +45,16 @@ class OpenAICompatibleJudge(Judge):
         await self._client.aclose()
 
     async def verdict(self, text: str) -> JudgeVerdict:
+        verdict_ = await self._verdict(text)
+        try:
+            from mithril.metrics import JUDGE_CALLS
+
+            JUDGE_CALLS.labels(verdict=verdict_.verdict).inc()
+        except Exception:  # nosec B110 — metrics must never break the request path  # noqa: BLE001
+            pass
+        return verdict_
+
+    async def _verdict(self, text: str) -> JudgeVerdict:
         body: dict[str, Any] = {
             "model": self.model,
             "messages": build_judge_messages(text),
@@ -117,7 +127,7 @@ class OpenAICompatibleJudge(Judge):
 
         return self._parse(content, latency_ms)
 
-    def _parse(self, content: str, latency_ms: float) -> JudgeVerdict:
+    def _parse(self, content: Any, latency_ms: float) -> JudgeVerdict:
         """Extract a JudgeVerdict from the judge's raw text response."""
         if not isinstance(content, str):
             return JudgeVerdict(
@@ -151,7 +161,9 @@ class OpenAICompatibleJudge(Judge):
             )
 
         raw_verdict = str(data.get("verdict", "")).lower().strip()
-        verdict = "attack" if raw_verdict == "attack" else "benign"
+        verdict: Literal["attack", "benign"] = (
+            "attack" if raw_verdict == "attack" else "benign"
+        )
 
         try:
             confidence = float(data.get("confidence", 0.0))

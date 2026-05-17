@@ -1,0 +1,100 @@
+image:
+  repository: ghcr.io/aarongrillot98/mithril
+  tag: ""  # falls back to .Chart.appVersion when empty
+  pullPolicy: IfNotPresent
+
+replicas: 1
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+config:
+  upstreamUrl: https://api.openai.com/v1
+  mode: block
+  threshold: "0.7"
+  judgeEnabled: false
+  judgeProvider: openai_compat
+  judgeBaseUrl: https://api.openai.com/v1
+  judgeModel: gpt-4o-mini
+  outputScanEnabled: false
+  outputScanMode: redact
+  embeddingEnabled: false
+  metricsEnabled: true
+  maxBodyBytes: "1048576"
+  maxResponseBytes: "4194304"
+
+# Free-form additional env vars (e.g. MITHRIL_* extras not surfaced above).
+# Each entry is forwarded verbatim into the container's env: list.
+extraEnv: []
+#  - name: MITHRIL_THRESHOLD
+#    value: "0.85"
+
+# API keys live in a Kubernetes Secret managed by the chart.
+secrets:
+  judgeApiKey: ""
+
+# Persistent volume for the SQLite event log. Leave enabled in production
+# unless you've migrated the event store to an external database.
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  mountPath: /data
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+podSecurityContext:
+  fsGroup: 10001
+  runAsNonRoot: true
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+probes:
+  liveness:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 3
+  readiness:
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 75
+
+podAnnotations: {}

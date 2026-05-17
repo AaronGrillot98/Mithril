@@ -35,6 +35,12 @@ jobs:
       - run: ruff check .
 
   # --- 2. PyPI --------------------------------------------------------------
+  #
+  # Uses the existing PYPI_API_TOKEN secret. OIDC trusted publishing can be
+  # turned on later: configure once at
+  # https://pypi.org/manage/account/publishing/ (pointing at this repo + this
+  # workflow + the `pypi` environment) and then remove the `password:` line
+  # below — the `id-token: write` permission is already granted.
   pypi:
     name: publish to PyPI
     needs: validate
@@ -42,6 +48,11 @@ jobs:
     environment:
       name: pypi
       url: https://pypi.org/p/mithril-llm
+    permissions:
+      id-token: write   # OIDC ready (Sigstore attestation when trusted publishing is enabled)
+      contents: read
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -62,6 +73,17 @@ jobs:
             echo "::error::tag $tag does not match pyproject version $pyver"
             exit 1
           fi
+      - name: Generate subject hashes for SLSA
+        id: hash
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          echo "hashes=$(sha256sum * | base64 -w0)" >> "$GITHUB_OUTPUT"
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pypi-dist
+          path: dist/*
       - name: Upload to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
@@ -75,6 +97,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      tag: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -100,6 +125,7 @@ jobs:
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -109,3 +135,145 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # --- 4. CycloneDX SBOM for the Python distribution -----------------------
+  sbom-python:
+    name: SBOM (Python)
+    needs: pypi
+    runs-on: ubuntu-latest
+    continue-on-error: true   # supply-chain enhancement; don't block the release
+    permissions:
+      contents: write   # action-gh-release writes release assets
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip cyclonedx-bom
+      - name: Install runtime deps into a fresh environment
+        run: python -m pip install .
+      - name: Generate CycloneDX SBOM
+        run: cyclonedx-py environment --of JSON -o mithril-llm-python.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-python
+          path: mithril-llm-python.cdx.json
+      - name: Attach SBOM to GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mithril-llm-python.cdx.json
+
+  # --- 5. CycloneDX SBOM for the published container image ------------------
+  sbom-docker:
+    name: SBOM (Docker)
+    needs: docker
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - name: Generate SBOM (CycloneDX)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/mithril@${{ needs.docker.outputs.digest }}
+          format: cyclonedx-json
+          output-file: mithril-docker.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-docker
+          path: mithril-docker.cdx.json
+      - name: Attach SBOM to GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mithril-docker.cdx.json
+
+  # --- 6. Cosign keyless signing for the container image -------------------
+  cosign:
+    name: cosign sign image
+    needs: docker
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      id-token: write   # keyless OIDC signing
+      packages: write
+    steps:
+      - uses: sigstore/cosign-installer@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Sign image (keyless)
+        run: |
+          cosign sign --yes \
+            ghcr.io/${{ github.repository_owner }}/mithril@${{ needs.docker.outputs.digest }}
+
+  # --- 7. SLSA Build L3 provenance for the Python distribution -------------
+  #
+  # Disabled until the SLSA reusable workflow has been validated against this
+  # repo end-to-end. The job stays here as documentation of the planned
+  # provenance flow — flip `if` to `true` (or remove the line) once tested.
+  slsa-python:
+    name: SLSA provenance (Python)
+    needs: pypi
+    if: false
+    permissions:
+      id-token: write
+      actions: read
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0
+    with:
+      base64-subjects: ${{ needs.pypi.outputs.hashes }}
+      upload-assets: true
+
+  # --- 8. SLSA Build L3 provenance for the container image -----------------
+  slsa-docker:
+    name: SLSA provenance (Docker)
+    needs: docker
+    if: false
+    permissions:
+      id-token: write
+      actions: read
+      packages: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.0.0
+    with:
+      image: ghcr.io/${{ github.repository_owner }}/mithril
+      digest: ${{ needs.docker.outputs.digest }}
+      registry-username: ${{ github.actor }}
+    secrets:
+      registry-password: ${{ secrets.GITHUB_TOKEN }}
+
+  # --- 9. Trivy vulnerability scan on the published container image --------
+  #
+  # Runs against the GHCR image we just published. Surfaces HIGH / CRITICAL
+  # findings as SARIF in the Security tab but does not fail the release —
+  # tighten to `exit-code: '1'` once the baseline is clean.
+  trivy:
+    name: trivy scan (Docker)
+    needs: docker
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/mithril@${{ needs.docker.outputs.digest }}
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: '0'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+      - name: Upload SARIF results
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-image

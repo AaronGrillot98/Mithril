@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mithril.fullname" . }}
+  labels:
+    {{- include "mithril.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    {{- include "mithril.selectorLabels" . | nindent 4 }}

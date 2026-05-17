@@ -14,7 +14,10 @@ class Settings(BaseSettings):
 
     # --- Proxy ---------------------------------------------------------------
     upstream_url: str = "https://api.openai.com/v1"
-    host: str = "0.0.0.0"
+    # Bind to all interfaces by default — the proxy is designed to run in a
+    # container or behind an ingress that controls reachability. Override
+    # via MITHRIL_HOST for bare-metal deployments that want a single iface.
+    host: str = "0.0.0.0"  # nosec B104
     port: int = Field(default=8080, ge=1, le=65535)
     mode: Literal["block", "log"] = "block"
     threshold: float = Field(default=0.7, ge=0.0, le=1.0)
@@ -84,6 +87,12 @@ class Settings(BaseSettings):
     #                 The v0.4 default. Breaks streaming UX but supports
     #                 redaction.
     output_scan_stream_mode: Literal["incremental", "buffer"] = "incremental"
+
+    # --- Observability (v0.6) ------------------------------------------------
+    # Exposes Prometheus metrics on /metrics. Enabled by default; set to false
+    # if the metrics surface is considered an information leak in your
+    # deployment.
+    metrics_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_output_scan_marker(self) -> "Settings":

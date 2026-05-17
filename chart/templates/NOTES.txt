@@ -1,0 +1,27 @@
+Mithril {{ .Chart.AppVersion }} has been deployed.
+
+Get the application URL:
+{{- if .Values.ingress.enabled }}
+{{- range $host := .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}
+{{- end }}
+{{- else if contains "NodePort" .Values.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "mithril.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.service.type }}
+     NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+  kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "mithril.fullname" . }}
+{{- else if contains "ClusterIP" .Values.service.type }}
+  kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "mithril.fullname" . }} 8080:{{ .Values.service.port }}
+  Then point your OpenAI SDK at http://localhost:8080/v1
+{{- end }}
+
+Health check:
+  curl http://localhost:8080/health
+
+Metrics (if enabled):
+  curl http://localhost:8080/metrics
+
+Dashboard:
+  Open http://localhost:8080/ in a browser.

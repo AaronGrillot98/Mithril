@@ -45,7 +45,7 @@ def serve(
 
 @app.command()
 def scan(
-    text: str = typer.Argument(None, help="Text to scan. Reads stdin if omitted."),
+    text: str | None = typer.Argument(None, help="Text to scan. Reads stdin if omitted."),
     threshold: float = typer.Option(settings.threshold, help="Block threshold."),
     judge: bool = typer.Option(
         False,

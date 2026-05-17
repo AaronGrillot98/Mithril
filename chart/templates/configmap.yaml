@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mithril.fullname" . }}-config
+  labels:
+    {{- include "mithril.labels" . | nindent 4 }}
+data:
+  MITHRIL_UPSTREAM_URL: {{ .Values.config.upstreamUrl | quote }}
+  MITHRIL_MODE: {{ .Values.config.mode | quote }}
+  MITHRIL_THRESHOLD: {{ .Values.config.threshold | quote }}
+  MITHRIL_JUDGE_ENABLED: {{ .Values.config.judgeEnabled | quote }}
+  MITHRIL_JUDGE_PROVIDER: {{ .Values.config.judgeProvider | quote }}
+  MITHRIL_JUDGE_BASE_URL: {{ .Values.config.judgeBaseUrl | quote }}
+  MITHRIL_JUDGE_MODEL: {{ .Values.config.judgeModel | quote }}
+  MITHRIL_OUTPUT_SCAN_ENABLED: {{ .Values.config.outputScanEnabled | quote }}
+  MITHRIL_OUTPUT_SCAN_MODE: {{ .Values.config.outputScanMode | quote }}
+  MITHRIL_EMBEDDING_ENABLED: {{ .Values.config.embeddingEnabled | quote }}
+  MITHRIL_METRICS_ENABLED: {{ .Values.config.metricsEnabled | quote }}
+  MITHRIL_MAX_BODY_BYTES: {{ .Values.config.maxBodyBytes | quote }}
+  MITHRIL_MAX_RESPONSE_BYTES: {{ .Values.config.maxResponseBytes | quote }}
+  MITHRIL_DB_PATH: {{ printf "%s/mithril.db" .Values.persistence.mountPath | quote }}

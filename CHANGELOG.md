@@ -6,6 +6,105 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-05-17
+
+Polish, hardening, and supply-chain trust. No breaking changes to the
+runtime API — everything in this release is either operational (CI,
+release pipeline, packaging) or additive (Prometheus metrics, deployment
+docs).
+
+### Added
+- **Prometheus `/metrics` endpoint** (default-on; gate with
+  `MITHRIL_METRICS_ENABLED=false`). Alongside the standard FastAPI HTTP
+  histograms, Mithril emits custom counters and a histogram:
+  `mithril_blocked_total{severity,rule_id,detector}`,
+  `mithril_allowed_total`, `mithril_scan_duration_seconds`,
+  `mithril_judge_calls_total{verdict}`,
+  `mithril_output_blocked_total{mode,severity}`, and
+  `mithril_event_log_writes_total`. Wire-ups live in `server.py`,
+  `judges/openai_compat.py`, `output/scanner.py`, and `storage.py` and
+  all swallow exceptions so a misconfigured metrics backend can't
+  break the request path.
+- **Helm chart** under `chart/`. Production-leaning defaults:
+  ClusterIP service, ConfigMap + Secret split, optional Ingress, HPA,
+  PVC for the SQLite event log, non-root pod / read-only root FS, and
+  `/health` probes. See `chart/README.md` for the values reference.
+- **Conda-forge recipe** staged at `conda/recipe/meta.yaml`. The repo
+  carries the recipe; submission to `conda-forge/staged-recipes` is a
+  manual follow-up.
+- **Homebrew formula** staged at `homebrew/Formula/mithril.rb`. The
+  recipe is ready to push to a standalone tap repo
+  (`AaronGrillot98/homebrew-mithril`); resource SHAs are placeholders
+  that `brew update-python-resources mithril` can fill once the tap is
+  live.
+- **Production deployment guide** at `docs/deployment.md`. Covers
+  Docker Compose / Helm / systemd paths, the hardening checklist,
+  observability with the new metrics, scaling notes, the upgrade
+  flow, and an incident-response runbook.
+- **`py.typed` marker** ships in the wheel so downstream callers
+  pick up Mithril's type annotations.
+- **mypy CI gate.** `[tool.mypy]` lives in `pyproject.toml` (non-strict
+  to start; `ignore_missing_imports = true` so optional integrations
+  don't fail the run). A new `typecheck` job runs `mypy mithril` on
+  every PR.
+- **Bandit CI gate.** `[tool.bandit]` configured in `pyproject.toml`.
+  Justified `# nosec` annotations on the metrics fire-and-forget
+  swallowers (B110) and on the proxy's default bind-all-interfaces
+  (B104). The `security` CI job blocks merges on new findings.
+- **pip-audit CI gate.** `pip-audit --strict` runs against the resolved
+  install on every PR; any dependency CVE fails the build.
+- **CycloneDX SBOMs** generated and attached to each GitHub release —
+  one for the Python distribution (`cyclonedx-py`) and one for the
+  GHCR image (`anchore/sbom-action`).
+- **Cosign keyless signing** of the published GHCR image (OIDC,
+  `sigstore/cosign-installer@v3`). PyPI upload keeps the existing
+  `PYPI_API_TOKEN` flow but the workflow is now OIDC-ready — flipping
+  to trusted publishing is a one-line change after the manual PyPI
+  setup.
+- **SLSA Build L3 provenance** jobs staged (gated `if: false`) for the
+  Python distribution and the container image. The reusable workflow
+  references and inputs are wired up; flip the gate after a dry-run.
+- **Trivy scan** of the published GHCR image in the release workflow.
+  HIGH / CRITICAL findings upload to GitHub code-scanning as SARIF;
+  the scan is informational on this release (won't block the publish)
+  so the baseline can be measured before tightening to `exit-code: '1'`.
+- **Configuration knob:** `MITHRIL_METRICS_ENABLED` (default `true`).
+
+### Changed
+- `pyproject.toml`: added `prometheus-fastapi-instrumentator>=7.0` as
+  a core runtime dependency. New dev dependencies: `mypy`, `bandit`,
+  `pip-audit`.
+- `release.yml`: restructured to expose `pypi.outputs.hashes` and
+  `docker.outputs.digest` so the SLSA generators can attest the
+  published artifacts.
+- `judges/openai_compat.py`: tightened the verdict literal so mypy
+  catches accidental string returns; passes the parser argument as
+  `Any` to keep the non-string-content guard reachable.
+- `server.py`: introduced a `body_bytes: bytes | Response` typed
+  binding through the blocking proxy path so mypy verifies the
+  output-scan branching is well-typed.
+- `cli.py`: `scan` command argument annotated `str | None` to match
+  Typer's `Argument(None, …)` default.
+
+### Operational notes
+- **No manual prereqs required to tag v0.6.0.** The existing
+  `PYPI_API_TOKEN` secret keeps publishing the wheel; cosign uses
+  keyless OIDC; SBOM jobs are best-effort (`continue-on-error: true`);
+  SLSA jobs are staged but gated `if: false`. Tighten each
+  incrementally in follow-up releases once the baseline is observed.
+- The conda-forge recipe and Homebrew formula are staged in-repo; the
+  conda-forge PR and the `homebrew-mithril` tap repo are manual
+  follow-up steps owned by the maintainer.
+
+### Validation
+- pytest: 202/202 passing (4 new metrics tests).
+- ruff: clean.
+- mypy: clean (`mypy mithril` against the full package).
+- bandit: clean (5 findings, all annotated with justified `# nosec`).
+- pip-audit: clean.
+- internal benchmark: 100/100.
+- JailbreakBench wrapped: 100/100.
+
 ## [0.5.1] — 2026-05-16
 
 Third hardening pass — full audit of the v0.5 code surface. Five real bugs
