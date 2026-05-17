@@ -5,6 +5,9 @@ Self-contained Pillow renderer. Matches the deep-night + mithril-silver +
 moonlit-blue palette used by the dashboard, so the README's hero image
 visually connects to the running app screenshot below it.
 
+The logo on the left is "Option C" from `render_logo_options.py`: a solid
+shield with a silver→moon gradient and the M cut out as negative space.
+
 Usage:
     python scripts/render_banner.py
 """
@@ -64,7 +67,6 @@ def load_font(size: int, *, weight: str = "regular") -> ImageFont.FreeTypeFont:
             return ImageFont.truetype(name, size)
         except OSError:
             pass
-    # Common Windows / Linux / macOS absolute paths.
     for path in [
         r"C:\Windows\Fonts\segoeuib.ttf" if weight == "bold" else r"C:\Windows\Fonts\segoeui.ttf",
         r"C:\Windows\Fonts\arialbd.ttf" if weight == "bold" else r"C:\Windows\Fonts\arial.ttf",
@@ -94,63 +96,82 @@ def draw_background(img: Image.Image) -> None:
     glow = glow.filter(ImageFilter.GaussianBlur(radius=30))
     img.paste(glow, (0, 0), glow)
 
-    # Subtle hairline at the bottom for a "card-on-page" feel.
     line = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
     ldraw = ImageDraw.Draw(line)
     ldraw.line([(0, HEIGHT - 1), (WIDTH, HEIGHT - 1)], fill=HAIRLINE, width=1)
     img.paste(line, (0, 0), line)
 
 
-def draw_logo(img: Image.Image, cx: int, cy: int, size: int) -> None:
-    """Hexagonal shield with an inscribed M-rune. Matches the dashboard logo."""
+def draw_logo_c(img: Image.Image, cx: int, cy: int, size: int) -> None:
+    """Solid shield, gradient fill, M as negative space — Option C from render_logo_options.py.
 
-    # Hex vertices (pointy-top), normalized.
-    def hex_points(cx: int, cy: int, r: int) -> list[tuple[int, int]]:
-        from math import cos, pi, sin
-
-        return [
-            (cx + int(r * cos((i / 6) * 2 * pi - pi / 2)),
-             cy + int(r * sin((i / 6) * 2 * pi - pi / 2)))
-            for i in range(6)
-        ]
-
-    layer = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
-    ldraw = ImageDraw.Draw(layer)
-
-    # Outer hex stroke with subtle inner fill.
-    outer = hex_points(cx, cy, size // 2)
-    ldraw.polygon(outer, fill=(MOON[0], MOON[1], MOON[2], 24), outline=None)
-    ldraw.line(outer + [outer[0]], fill=MITHRIL, width=3)
-
-    # Inner hex (smaller, ghosted).
-    inner = hex_points(cx, cy, int(size * 0.38))
-    ldraw.line(inner + [inner[0]], fill=(*MITHRIL, 110), width=1)
-
-    # M-rune across the middle. Geometric: descending → peak in → trough → peak out → descending.
-    w = int(size * 0.55)
-    h = int(size * 0.38)
-    left = cx - w // 2
-    right = cx + w // 2
+    Constructed in three passes:
+      1. Outer halo (gaussian-blurred shield silhouette).
+      2. Gradient-filled shield using a mask.
+      3. The shield mask has the M strokes punched out so the deep-night
+         background shows through where the M strokes would be.
+    """
+    w = size
+    h = int(size * 1.05)
     top = cy - h // 2
     bot = cy + h // 2
-    mid_y = cy - 2
-    runic = [
-        (left, bot),
-        (left + w // 6, top),
-        (cx, mid_y),
-        (right - w // 6, top),
-        (right, bot),
+    left = cx - w // 2
+    right = cx + w // 2
+    shield = [
+        (left, top + int(h * 0.12)),
+        (cx, top),
+        (right, top + int(h * 0.12)),
+        (right, top + int(h * 0.58)),
+        (cx, bot),
+        (left, top + int(h * 0.58)),
     ]
-    ldraw.line(runic, fill=MITHRIL_HI, width=5, joint="curve")
 
-    # Soft outer glow.
-    glow = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
-    gdraw = ImageDraw.Draw(glow)
-    gdraw.line(outer + [outer[0]], fill=(*MOON, 100), width=10)
-    glow = glow.filter(ImageFilter.GaussianBlur(radius=18))
+    # Halo
+    glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(glow).polygon(shield, fill=(*MOON, 60))
+    glow = glow.filter(ImageFilter.GaussianBlur(radius=32))
     img.paste(glow, (0, 0), glow)
 
-    img.paste(layer, (0, 0), layer)
+    # Shield mask
+    shield_mask = Image.new("L", img.size, 0)
+    ImageDraw.Draw(shield_mask).polygon(shield, fill=255)
+
+    # Silver → moon vertical gradient layer
+    grad = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    gpx = grad.load()
+    for y in range(img.size[1]):
+        if y < top or y > bot:
+            for x in range(img.size[0]):
+                gpx[x, y] = (0, 0, 0, 0)
+            continue
+        t = (y - top) / max(1, bot - top)
+        r = int(MITHRIL_HI[0] + (MOON[0] - MITHRIL_HI[0]) * t)
+        g = int(MITHRIL_HI[1] + (MOON[1] - MITHRIL_HI[1]) * t)
+        b = int(MITHRIL_HI[2] + (MOON[2] - MITHRIL_HI[2]) * t)
+        for x in range(img.size[0]):
+            gpx[x, y] = (r, g, b, 255)
+
+    # M-cutout mask (black on the M, white elsewhere) — we'll subtract this from the shield mask.
+    cut = Image.new("L", img.size, 0)
+    cdraw = ImageDraw.Draw(cut)
+    m_w = int(w * 0.58)
+    m_h = int(h * 0.46)
+    mx_left = cx - m_w // 2
+    mx_right = cx + m_w // 2
+    my_top = cy - m_h // 2 + int(h * 0.03)
+    my_bot = cy + m_h // 2 + int(h * 0.03)
+    valley_y = my_top + int(m_h * 0.60)
+    stroke = max(10, size // 14)
+    cdraw.line([(mx_left, my_bot), (mx_left, my_top)], fill=255, width=stroke)
+    cdraw.line([(mx_right, my_bot), (mx_right, my_top)], fill=255, width=stroke)
+    cdraw.line([(mx_left, my_top), (cx, valley_y)], fill=255, width=stroke)
+    cdraw.line([(mx_right, my_top), (cx, valley_y)], fill=255, width=stroke)
+
+    # Final mask = shield AND NOT cut.
+    cut_inv = Image.eval(cut, lambda v: 255 - v)
+    final_mask = Image.composite(shield_mask, Image.new("L", img.size, 0), cut_inv)
+
+    img.paste(grad, (0, 0), final_mask)
 
 
 def _gradient_text(
@@ -166,12 +187,10 @@ def _gradient_text(
     w = bbox[2] - bbox[0]
     h = bbox[3] - bbox[1]
 
-    # Make a mask of the text.
     mask = Image.new("L", (w + 4, h + bbox[1] + 4), 0)
     mdraw = ImageDraw.Draw(mask)
     mdraw.text((-bbox[0], 0), text, fill=255, font=font)
 
-    # Vertical gradient layer.
     grad = Image.new("RGBA", (w + 4, h + bbox[1] + 4), (0, 0, 0, 0))
     gpx = grad.load()
     total = h + bbox[1] + 4
@@ -196,7 +215,6 @@ def draw_text(img: Image.Image) -> None:
     text_x = 520
     title_y = 95
 
-    # "Mithril" with vertical gradient (silver → moonlit blue).
     _gradient_text(
         img,
         "Mithril",
@@ -206,7 +224,6 @@ def draw_text(img: Image.Image) -> None:
         color_bottom=MOON,
     )
 
-    # Tagline.
     draw = ImageDraw.Draw(img)
     draw.text(
         (text_x, title_y + 140),
@@ -215,7 +232,6 @@ def draw_text(img: Image.Image) -> None:
         font=tagline_font,
     )
 
-    # One-liner — the pitch.
     draw.text(
         (text_x, title_y + 200),
         "Block prompt injection, jailbreaks, and PII exfiltration at the proxy.",
@@ -223,7 +239,6 @@ def draw_text(img: Image.Image) -> None:
         font=sub_font,
     )
 
-    # Bottom-right corner: small, quiet positioning line.
     label = "Open source · Self-hosted · OpenAI-compatible"
     bbox = micro_font.getbbox(label)
     lw = bbox[2] - bbox[0]
@@ -238,7 +253,7 @@ def draw_text(img: Image.Image) -> None:
 def main() -> int:
     img = Image.new("RGB", (WIDTH, HEIGHT), BG_0)
     draw_background(img)
-    draw_logo(img, cx=300, cy=HEIGHT // 2, size=240)
+    draw_logo_c(img, cx=300, cy=HEIGHT // 2, size=230)
     draw_text(img)
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)

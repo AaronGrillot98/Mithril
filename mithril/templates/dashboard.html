@@ -241,36 +241,35 @@
 </head>
 <body>
 
-<!-- Inline SVG: hexagonal shield with inscribed mithril rune -->
+<!-- Inline SVG defs: shared gradient and mask used by every <svg.logo> instance.
+     The logo is a solid shield filled with a silver→moon gradient, with the
+     M cut out as negative space via a mask. -->
 <svg width="0" height="0" style="position:absolute">
   <defs>
-    <linearGradient id="mithril-stroke" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"  stop-color="#e8edf5"/>
-      <stop offset="55%" stop-color="#a3b3d4"/>
+    <linearGradient id="mithril-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#e8edf5"/>
+      <stop offset="55%"  stop-color="#a3b3d4"/>
       <stop offset="100%" stop-color="#5b9aff"/>
     </linearGradient>
-    <linearGradient id="mithril-fill" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%"  stop-color="rgba(91,154,255,0.10)"/>
-      <stop offset="100%" stop-color="rgba(91,154,255,0.02)"/>
-    </linearGradient>
+    <mask id="mithril-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="48">
+      <rect width="48" height="48" fill="black"/>
+      <path d="M24 4 L43 9 L43 27 L24 44 L5 27 L5 9 Z" fill="white"/>
+      <path d="M13 34 L13 16 L24 27 L35 16 L35 34"
+            fill="none" stroke="black" stroke-width="4"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </mask>
   </defs>
 </svg>
 
 <header>
   <div class="brand">
     <svg class="logo" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <!-- hex shield -->
-      <path d="M24 3 L42 13 L42 35 L24 45 L6 35 L6 13 Z"
-            stroke="url(#mithril-stroke)" stroke-width="1.6"
-            fill="url(#mithril-fill)" stroke-linejoin="round"/>
-      <!-- inner hex -->
-      <path d="M24 9 L37 16.5 L37 31.5 L24 39 L11 31.5 L11 16.5 Z"
-            stroke="url(#mithril-stroke)" stroke-width="0.7"
-            opacity="0.5" fill="none" stroke-linejoin="round"/>
-      <!-- inscribed M-rune -->
-      <path d="M15 30 L18 18 L24 26 L30 18 L33 30"
-            stroke="url(#mithril-stroke)" stroke-width="1.8"
-            stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <!-- soft moonlit halo behind the shield -->
+      <path d="M24 4 L43 9 L43 27 L24 44 L5 27 L5 9 Z"
+            fill="#5b9aff" opacity="0.22"
+            style="filter: blur(3px)"/>
+      <!-- gradient-filled shield with M cut out as negative space -->
+      <rect width="48" height="48" fill="url(#mithril-grad)" mask="url(#mithril-cut)"/>
     </svg>
     <div>
       <h1>Mithril</h1>
@@ -358,12 +357,7 @@
   {% else %}
   <div class="empty">
     <svg viewBox="0 0 48 48" fill="none">
-      <path d="M24 3 L42 13 L42 35 L24 45 L6 35 L6 13 Z"
-            stroke="url(#mithril-stroke)" stroke-width="1.6"
-            fill="url(#mithril-fill)" stroke-linejoin="round"/>
-      <path d="M15 30 L18 18 L24 26 L30 18 L33 30"
-            stroke="url(#mithril-stroke)" stroke-width="1.8"
-            stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <rect width="48" height="48" fill="url(#mithril-grad)" mask="url(#mithril-cut)"/>
     </svg>
     <div class="title">Standing watch. No events yet.</div>
     <div class="hint">curl -X POST http://localhost:{{ settings.port }}/v1/scan -d '{"text":"hello"}'</div>
