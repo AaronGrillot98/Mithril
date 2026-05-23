@@ -9,7 +9,7 @@
 [![Downloads](https://img.shields.io/pypi/dm/mithril-llm?color=4c83cf)](https://pypi.org/project/mithril-llm/)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-167%20passing-brightgreen.svg)](#validation)
+[![Tests](https://img.shields.io/badge/tests-203%20passing-brightgreen.svg)](#validation)
 [![Coverage](https://img.shields.io/badge/coverage-88%25-brightgreen.svg)](#validation)
 [![JailbreakBench](https://img.shields.io/badge/JailbreakBench-100%25-brightgreen.svg)](#benchmarks)
 
@@ -393,7 +393,7 @@ Every rule is one line in [`mithril/detectors/heuristics.py`](mithril/detectors/
 
 ## Validation
 
-- **167 tests** across detector, judge, integration, output, server, storage, proxy, middleware, and CLI layers.
+- **203 tests** across detector, judge, integration, output, server, storage, proxy, middleware, and CLI layers.
 - **88% line coverage.**
 - **CI matrix:** Ubuntu + Windows × Python 3.10 / 3.11 / 3.12.
 - **ruff lint** clean.
@@ -447,7 +447,8 @@ Scrape config:
 - [x] **v0.3.1 + v0.3.2** — Hardening pass: 6 real bugs fixed, coverage 58% → 88%.
 - [x] **v0.4** — Output scanning (block / redact / log).
 - [x] **v0.5** — Incremental streaming output scan + embedding-similarity layer.
-- [ ] **v0.6** — Trail-buffer redaction for streaming responses; per-route policies; embedding-based detection of GCG-style adversarial suffixes.
+- [x] **v0.6** — Polish + supply-chain trust pass: Prometheus `/metrics`, Helm chart, Conda recipe, Homebrew formula, mypy + bandit + pip-audit gates, SBOM (CycloneDX) on every release, cosign keyless signing, SLSA L3 provenance, Trivy scan, hardened against starlette `PYSEC-2026-161` Host-header path injection.
+- [ ] **v0.7** — Trail-buffer redaction for streaming responses; per-route policies; embedding-based detection of GCG-style adversarial suffixes.
 - [ ] **v1.0** — Published precision/recall against [Garak] as well.
 
 [JailbreakBench]: https://jailbreakbench.github.io/
@@ -467,7 +468,7 @@ Scrape config:
 
 ```bash
 pip install -e ".[dev]"
-pytest                          # 167 tests
+pytest                          # 203 tests
 ruff check .
 python scripts/benchmark.py     # internal corpus
 python scripts/jailbreakbench_eval.py --wrap   # JBB

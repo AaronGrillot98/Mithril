@@ -57,10 +57,13 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             return response
         finally:
             duration_ms = (time.perf_counter() - start) * 1000
+            # Use scope["path"] over request.url.path so a poisoned Host
+            # header cannot inject text into our access log
+            # (PYSEC-2026-161 / GHSA-86qp-5c8j-p5mr).
             logger.info(
                 "%s %s %d %.2fms id=%s",
                 request.method,
-                request.url.path,
+                request.scope.get("path", "") or "",
                 status,
                 duration_ms,
                 request_id,

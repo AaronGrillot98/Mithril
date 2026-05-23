@@ -122,7 +122,11 @@ class MithrilMiddleware(BaseHTTPMiddleware):
             return False
         if self.paths is None:
             return True
-        path = request.url.path
+        # Use the raw ASGI scope path, not `request.url.path`. The latter is
+        # reconstructed from the Host header and can be poisoned by a malicious
+        # client (PYSEC-2026-161 / GHSA-86qp-5c8j-p5mr). The scope path is the
+        # path parsed off the HTTP request line by the ASGI server.
+        path = request.scope.get("path", "") or ""
         return any(path == p or path.startswith(p.rstrip("/") + "/") for p in self.paths)
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]

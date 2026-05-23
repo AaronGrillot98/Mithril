@@ -16,7 +16,9 @@ from mithril.judges import build_judge
 
 app = typer.Typer(
     add_completion=False,
-    help="Mithril — a firewall for LLMs.",
+    # ASCII-only help text — Unicode em-dash renders as a replacement glyph on
+    # Windows consoles using cp1252.
+    help="Mithril - a firewall for LLMs.",
 )
 console = Console()
 

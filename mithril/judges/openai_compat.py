@@ -50,7 +50,8 @@ class OpenAICompatibleJudge(Judge):
             from mithril.metrics import JUDGE_CALLS
 
             JUDGE_CALLS.labels(verdict=verdict_.verdict).inc()
-        except Exception:  # nosec B110 — metrics must never break the request path  # noqa: BLE001
+        # Metrics must never break the request path.
+        except Exception:  # noqa: BLE001  # nosec B110
             pass
         return verdict_
 

@@ -103,4 +103,12 @@ jobs:
       # pip-audit still exits non-zero on any real vulnerability finding.
       # Add --ignore-vuln <GHSA-id> with a justified reason for any false
       # positives that creep in.
-      - run: pip-audit --skip-editable
+      #
+      # PYSEC-2026-161 (starlette Host-header path injection): mitigated in
+      # Mithril by reading scope["path"] instead of request.url.path in
+      # security-sensitive code (see _should_scan + access logger) and by
+      # stripping the Host header before forwarding upstream. The fix is in
+      # starlette 1.0.1 but we cannot bump it yet because
+      # prometheus-fastapi-instrumentator pins starlette<1.0.0. Drop this
+      # ignore once that pin relaxes.
+      - run: pip-audit --skip-editable --ignore-vuln PYSEC-2026-161

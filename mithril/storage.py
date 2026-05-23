@@ -106,7 +106,8 @@ class EventStore:
             from mithril.metrics import EVENT_LOG_WRITES
 
             EVENT_LOG_WRITES.inc()
-        except Exception:  # nosec B110 — metrics must never break the write path  # noqa: BLE001
+        # Metrics must never break the write path.
+        except Exception:  # noqa: BLE001  # nosec B110
             pass
 
     def recent(self, limit: int = 100) -> list[dict[str, Any]]:

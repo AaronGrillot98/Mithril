@@ -350,7 +350,7 @@ async def amain() -> int:
         "--wrap",
         action="store_true",
         help="Wrap each harmful behavior in a real-world jailbreak frame "
-        "(DAN / instruction-override / Developer Mode / AIM / etc.) — measures "
+        "(DAN / instruction-override / Developer Mode / AIM / etc.) - measures "
         "how well Mithril catches the attack technique rather than raw intent.",
     )
     parser.add_argument("--concurrency", type=int, default=8)

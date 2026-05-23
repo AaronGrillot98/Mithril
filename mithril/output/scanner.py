@@ -18,7 +18,8 @@ def _record_metrics(result: OutputScanResult) -> None:
         from mithril.metrics import record_output_action
 
         record_output_action(result.action, result)
-    except Exception:  # nosec B110 — metrics must never break the scan path  # noqa: BLE001
+    # Metrics must never break the scan path.
+    except Exception:  # noqa: BLE001  # nosec B110
         pass
 
 
@@ -29,7 +30,8 @@ def _record_metrics_log(result: OutputScanResult) -> None:
         # In log mode the action is "allow" but the scanner still found
         # something; surface it under a synthetic "log" mode label.
         record_output_action("log", result)
-    except Exception:  # nosec B110 — metrics must never break the scan path  # noqa: BLE001
+    # Metrics must never break the scan path.
+    except Exception:  # noqa: BLE001  # nosec B110
         pass
 
 
